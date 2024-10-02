@@ -35,13 +35,13 @@ mod systems;
 
 fn main() {
     let mut app = App::new();
-    let mut colors : Vec<&str> = Vec::new();
-    colors.push("FF00FF");
-    colors.push("#bbCEcB");
-    colors.push("FF00FF7F");
-    let mut rng = rand::thread_rng();
-    let index = rng.gen_range(0..3);
-    app.insert_resource(ClearColor(Color::hex(colors[index]).unwrap()));
+    // let mut colors : Vec<&str> = Vec::new();
+    // colors.push("FF00FF");
+    // colors.push("#bbCEcB");
+    // colors.push("FF00FF7F");
+    // let mut rng = rand::thread_rng();
+    // let index = rng.gen_range(0..3);
+    app.insert_resource(ClearColor(Color::hex("#bbCEcB").unwrap()));
     // base plugins
     app.add_plugins(RenetClientPlugin);
     app.add_plugins(NetcodeClientPlugin);

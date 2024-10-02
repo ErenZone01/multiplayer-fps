@@ -1,4 +1,3 @@
-use std::iter;
 
 use crate::{
     components::{MiniMap, MiniMapCell, MiniPlayer, MyPlayer, PlayerEntity},
