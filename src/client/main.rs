@@ -12,12 +12,13 @@ use bevy::{
     DefaultPlugins,
 };
 use bevy_renet::{transport::NetcodeClientPlugin, RenetClientPlugin};
+use rand::Rng;
 use renet::{
     transport::{ClientAuthentication, NetcodeClientTransport},
     ClientId, ConnectionConfig, RenetClient,
 };
 use multiplayer_demo::BOARD;
-use systems::check_connection;
+//use systems::check_connection;
 use crate::{
     resources::{MyClientId, PlayerEntities,Board},
     systems::{
@@ -34,7 +35,13 @@ mod systems;
 
 fn main() {
     let mut app = App::new();
-    app.insert_resource(ClearColor(Color::hex("#bbCEcB").unwrap()));
+    let mut colors : Vec<&str> = Vec::new();
+    colors.push("FF00FF");
+    colors.push("#bbCEcB");
+    colors.push("FF00FF7F");
+    let mut rng = rand::thread_rng();
+    let index = rng.gen_range(0..3);
+    app.insert_resource(ClearColor(Color::hex(colors[index]).unwrap()));
     // base plugins
     app.add_plugins(RenetClientPlugin);
     app.add_plugins(NetcodeClientPlugin);
@@ -73,7 +80,7 @@ fn main() {
 
     
     // game systems
-    app.add_systems(Update, (send_message_system,receive_message_system,check_connection));
+    app.add_systems(Update, (send_message_system,receive_message_system));
     app.add_systems(Update, handle_player_spawn_event_system);
     app.add_systems(Update, ((rotation_player, update_player_movement_system),mini_map_sync_event_system).chain());
     app.add_systems(Update, handle_lobby_sync_event_system);

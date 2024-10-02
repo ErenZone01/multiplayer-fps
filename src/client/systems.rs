@@ -35,7 +35,7 @@ use renet::{DefaultChannel, RenetClient};
 
 pub fn send_message_system(mut client: ResMut<RenetClient>, query: Query<(&MyPlayer, &Transform)>) {
     if client.is_disconnected() {
-        panic!("<++++++++++++++++++++++++++++Client is connected to the server++++++++++++++++++++++++++++++++++++++++++>");
+        panic!("<++++++++++++++++++++++++++++Client is disconnected to the server++++++++++++++++++++++++++++++++++++++++++>");
     }
     let (_, transform) = query.single();
     let player_sync = PlayerAttributes {
@@ -52,7 +52,6 @@ pub fn receive_message_system(
     mut lobby_sync_events: EventWriter<LobbySyncEvent>,
 ) {
     while let Some(message) = client.receive_message(DefaultChannel::ReliableOrdered) {
-        println!("preparation de la connection");
         let server_message = bincode::deserialize(&message).unwrap();
 
         match server_message {
@@ -372,10 +371,10 @@ fn check_collision(map: [[char; 15]; 15], position: Vec3) -> bool {
 //     map[x][z] == '1'
 // }
 
-pub fn check_connection(client: Res<RenetClient>) {
-    if client.is_connected() {
-        println!("Client is connected to the server");
-    } else {
-        println!(" checkconnection : Client is not connected to the server");
-    }
-}
+// pub fn check_connection(client: Res<RenetClient>) {
+//     if client.is_connected() {
+//         println!("Client is connected to the server");
+//     } else {
+//         println!(" checkconnection : Client is not connected to the server");
+//     }
+// }

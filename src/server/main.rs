@@ -17,7 +17,6 @@ mod resources;
 const SERVER_ADDR: &str = "0.0.0.0:5000";
 
 fn main() {
-    println!("je suis là");
     let mut app = App::new();
 
     // base plugins
