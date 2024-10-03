@@ -32,17 +32,35 @@ use multiplayer_demo::PlayerAttributes;
 use rand::Rng;
 use renet::{DefaultChannel, RenetClient};
 
-pub fn send_message_system(mut client: ResMut<RenetClient>, query: Query<(&MyPlayer, &Transform)>) {
+// pub fn send_message_system(mut client: ResMut<RenetClient>, query: Query<(&MyPlayer, &Transform)>) {
+//     if client.is_disconnected() {
+//         panic!("<++++++++++++++++++++++++++++Client is disconnected to the server++++++++++++++++++++++++++++++++++++++++++>");
+//     }
+//     let (_, transform) = query.single();
+//     let player_sync = PlayerAttributes {
+//         position: transform.translation.into(),
+//     };
+//     let message = bincode::serialize(&player_sync).unwrap();
+//     client.send_message(DefaultChannel::Unreliable, message);
+// }
+
+pub fn send_message_system(
+    mut client: ResMut<RenetClient>,
+    query: Query<(&MyPlayer, &Transform)>,
+) {
     if client.is_disconnected() {
-        panic!("<++++++++++++++++++++++++++++Client is disconnected to the server++++++++++++++++++++++++++++++++++++++++++>");
+        panic!("Client is disconnected from the server");
     }
     let (_, transform) = query.single();
+    
+    // Envoie uniquement la position du joueur local au serveur
     let player_sync = PlayerAttributes {
         position: transform.translation.into(),
     };
     let message = bincode::serialize(&player_sync).unwrap();
     client.send_message(DefaultChannel::Unreliable, message);
 }
+
 
 pub fn receive_message_system(
     mut client: ResMut<RenetClient>,
@@ -268,11 +286,44 @@ pub fn handle_player_spawn_event_system(
     }
 }
 
+// pub fn handle_lobby_sync_event_system(
+//     mut spawn_events: EventWriter<PlayerSpawnEvent>,
+//     mut sync_events: EventReader<LobbySyncEvent>,
+//     mut query: Query<(&PlayerEntity, &mut Transform)>,
+//     my_clinet_id: Res<MyClientId>,
+// ) {
+//     let event_option = sync_events.read().last();
+//     if event_option.is_none() {
+//         return;
+//     }
+//     let event = event_option.unwrap();
+
+//     for (client_id, player_sync) in event.0.iter() {
+//         if *client_id == my_clinet_id.0 {
+//             continue;
+//         }
+
+//         let mut found = false;
+//         for (player_entity, mut transform) in query.iter_mut() {
+//             if *client_id == player_entity.0 {
+//                 let new_position = player_sync.position;
+//                 transform.translation = new_position.into();
+//                 found = true;
+//             }
+//         }
+
+//         if !found {
+//             info!("Spawning player {}: {:?}", client_id, player_sync.position);
+//             spawn_events.send(PlayerSpawnEvent(*client_id));
+//         }
+//     }
+// }
+
 pub fn handle_lobby_sync_event_system(
     mut spawn_events: EventWriter<PlayerSpawnEvent>,
     mut sync_events: EventReader<LobbySyncEvent>,
     mut query: Query<(&PlayerEntity, &mut Transform)>,
-    my_clinet_id: Res<MyClientId>,
+    my_client_id: Res<MyClientId>, // ID du joueur local
 ) {
     let event_option = sync_events.read().last();
     if event_option.is_none() {
@@ -281,25 +332,30 @@ pub fn handle_lobby_sync_event_system(
     let event = event_option.unwrap();
 
     for (client_id, player_sync) in event.0.iter() {
-        if *client_id == my_clinet_id.0 {
+        // Ne pas mettre à jour la position du joueur local
+        if *client_id == my_client_id.0 {
             continue;
         }
 
+        // Mettre à jour la position des autres joueurs
         let mut found = false;
         for (player_entity, mut transform) in query.iter_mut() {
             if *client_id == player_entity.0 {
+                // Met à jour uniquement la position du joueur distant
                 let new_position = player_sync.position;
                 transform.translation = new_position.into();
                 found = true;
             }
         }
 
+        // Si le joueur n'existe pas encore, le spawn
         if !found {
             info!("Spawning player {}: {:?}", client_id, player_sync.position);
             spawn_events.send(PlayerSpawnEvent(*client_id));
         }
     }
 }
+
 
 pub fn mini_map_sync_event_system(
     player_3_d: Query<&mut Transform, With<MyPlayer>>,
@@ -357,7 +413,7 @@ fn check_collision(map: [[char; 15]; 15], position: Vec3) -> bool {
         return true; // Out of bounds, consider it a collision
     }
     
-    println!("Checking collision at x = {}, z = {}", x, z);
+    //println!("Checking collision at x = {}, z = {}", x, z);
     map[z][x] == '1'
 }
 

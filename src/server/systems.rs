@@ -42,38 +42,36 @@ pub fn receive_message_system(mut server: ResMut<RenetServer>, mut player_lobby:
     }
 }
 
-pub fn handle_events_system(
-    server: ResMut<RenetServer>,
-    mut lobby: ResMut<PlayerLobby>,
-) {
-    // Parcourt les clients connectés
-    for client_id in server.clients_id().iter() {
-        if !lobby.0.contains_key(client_id) {
-            // Si le client n'est pas déjà dans le lobby, on l'ajoute
-            println!("Ajout du client {} au lobby.", client_id);
-            lobby.0.insert(*client_id, multiplayer_demo::PlayerAttributes { position: [0.0,0.0,0.0] });
-        }
-    }
-}
-
-// pub fn handle_events_system(mut server: ResMut<RenetServer>, mut server_events: EventReader<ServerEvent>, mut player_lobby: ResMut<PlayerLobby>) {
-//     println!("preparation de la connection");
-//     for event in server_events.read() {
-//         println!("je suis dans l'event");
-//         match event {
-//             ServerEvent::ClientConnected { client_id } => {
-//                 println!("Client {client_id} connected");
-//                 player_lobby.0.insert(*client_id, PlayerAttributes { position: [0.0, 0.0, 0.0] });
-//                 let message = bincode::serialize(&multiplayer_demo::ServerMessage::PlayerJoin(*client_id)).unwrap();
-//                 server.broadcast_message_except(*client_id, DefaultChannel::ReliableOrdered, message);
-//             }
-//             ServerEvent::ClientDisconnected { client_id, reason } => {
-//                 println!("Client {client_id} disconnected: {reason}");
-//                 player_lobby.0.remove(client_id);
-//                 let message = bincode::serialize(&multiplayer_demo::ServerMessage::PlayerLeave(*client_id)).unwrap();
-//                 server.broadcast_message(DefaultChannel::ReliableOrdered, message);
-//             }
+// pub fn handle_events_system(
+//     server: ResMut<RenetServer>,
+//     mut lobby: ResMut<PlayerLobby>,
+// ) {
+//     // Parcourt les clients connectés
+//     for client_id in server.clients_id().iter() {
+//         if !lobby.0.contains_key(client_id) {
+//             // Si le client n'est pas déjà dans le lobby, on l'ajoute
+//             println!("Ajout du client {} au lobby.", client_id);
+//             lobby.0.insert(*client_id, multiplayer_demo::PlayerAttributes { position: [0.0,0.0,0.0] });
 //         }
 //     }
 // }
+
+pub fn handle_events_system(mut server: ResMut<RenetServer>, mut server_events: EventReader<ServerEvent>, mut player_lobby: ResMut<PlayerLobby>) {
+    for event in server_events.read() {
+        match event {
+            ServerEvent::ClientConnected { client_id } => {
+                println!("Client {client_id} connected");
+                player_lobby.0.insert(*client_id, PlayerAttributes { position: [0.0, 0.0, 0.0] });
+                let message = bincode::serialize(&multiplayer_demo::ServerMessage::PlayerJoin(*client_id)).unwrap();
+                server.broadcast_message_except(*client_id, DefaultChannel::ReliableOrdered, message);
+            }
+            ServerEvent::ClientDisconnected { client_id, reason } => {
+                println!("Client {client_id} disconnected: {reason}");
+                player_lobby.0.remove(client_id);
+                let message = bincode::serialize(&multiplayer_demo::ServerMessage::PlayerLeave(*client_id)).unwrap();
+                server.broadcast_message(DefaultChannel::ReliableOrdered, message);
+            }
+        }
+    }
+}
 
