@@ -18,12 +18,10 @@ use bevy::{
     },
     log::info,
     math::{
-        primitives::{Cuboid, Plane3d, Sphere},
-        Quat, Vec3,
+        primitives::{Cuboid, Plane3d, Sphere}, Vec3,
     },
     pbr::{MaterialMeshBundle, StandardMaterial},
-    prelude::{default, BuildChildren, DetectChanges, NodeBundle, With},
-    reflect::Reflect,
+    prelude::{default, BuildChildren, Local, NodeBundle, With},
     render::{color::Color, mesh::Mesh},
     transform::components::Transform,
     ui::{BackgroundColor, Style, Val},
@@ -102,7 +100,7 @@ pub fn receive_message_system(
 }
 
 pub fn update_player_movement_system(
-    mut map: Res<Board>,
+     map: Res<Board>,
     mut keyboard_events: EventReader<KeyboardInput>,
     mut query: Query<(&mut Transform, &MyPlayer)>,
 ) {
@@ -262,23 +260,70 @@ pub fn spawn_map_2d(
         });
 }
 
+
+// Fonction pour calculer la distance euclidienne entre deux couleurs
+fn color_distance(c1: &Color, c2: &Color) -> f32 {
+    let rgba1 = c1.as_rgba_f32(); // Tableau [f32; 4]
+    let rgba2 = c2.as_rgba_f32(); // Tableau [f32; 4]
+
+    // Calcul de la distance euclidienne sur les trois premières composantes (r, g, b)
+    ((rgba1[0] - rgba2[0]).powi(2) + (rgba1[1] - rgba2[1]).powi(2) + (rgba1[2] - rgba2[2]).powi(2)).sqrt()
+}
+
+
+
+
 pub fn handle_player_spawn_event_system(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut spawn_events: EventReader<PlayerSpawnEvent>,
+    mut existing_colors: Local<Vec<Color>>, // Stocke les couleurs déjà utilisées
 ) {
+    let mut rng = rand::thread_rng();
+
+    // Valeur de distance minimale entre les couleurs
+    let min_color_distance = 0.5; // Ajustable pour plus de distinction
+
     for event in spawn_events.read() {
         info!("Handling player spawn event: {:?}", event.0);
         let client_id = event.0;
 
+        let mut random_color;
+        let mut attempts = 0;
+
+        loop {
+            // Générer une couleur aléatoire
+            random_color = Color::rgb(
+                rng.gen_range(0.0..1.0), // Composante rouge
+                rng.gen_range(0.0..1.0), // Composante verte
+                rng.gen_range(0.0..0.5), // Limite le bleu pour éviter le bleu foncé
+            );
+
+            // Vérifier que la couleur est suffisamment différente des autres
+            let is_unique = existing_colors.iter().all(|existing_color| {
+                color_distance(&random_color, existing_color) > min_color_distance
+            });
+            
+
+            // Sortir de la boucle si la couleur est unique et non bleu foncé
+            if is_unique || attempts > 10 {
+                break;
+            }
+            attempts += 1;
+        }
+
+        // Ajouter la couleur générée à la liste des couleurs existantes
+        existing_colors.push(random_color.clone());
+
+        // Créer le joueur avec la couleur générée
         commands.spawn((
             MaterialMeshBundle {
                 material: materials.add(StandardMaterial {
-                    base_color: Color::rgb(1.0, 0.0, 0.0),
+                    base_color: random_color, // Applique la couleur générée
                     ..default()
                 }),
-                mesh: meshes.add(Cuboid::new(0.2, 0.2, 0.2)),
+                mesh: meshes.add(Cuboid::new(0.2, 0.2, 0.2)), // Taille du cube du joueur
                 ..default()
             },
             PlayerEntity(client_id),
@@ -394,16 +439,16 @@ pub fn rotation_player(
     }
 }
 
-fn rand_position_player(board: &Res<Board>) -> Vec3 {
-    let mut rng = rand::thread_rng();
-    loop {
-        let z = rng.gen_range(0..board.data.len());
-        let x = rng.gen_range(0..board.data[0].len());
-        if board.data[z][x] == '0' {
-            return Vec3::new(x as f32 - 7.0, 1.0, z as f32 - 7.0);
-        }
-    }
-}
+// fn rand_position_player(board: &Res<Board>) -> Vec3 {
+//     let mut rng = rand::thread_rng();
+//     loop {
+//         let z = rng.gen_range(0..board.data.len());
+//         let x = rng.gen_range(0..board.data[0].len());
+//         if board.data[z][x] == '0' {
+//             return Vec3::new(x as f32 - 7.0, 1.0, z as f32 - 7.0);
+//         }
+//     }
+// }
 
 fn check_collision(map: [[char; 15]; 15], position: Vec3) -> bool {
     let x = (-position.x + 7.0).round() as usize;

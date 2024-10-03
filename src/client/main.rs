@@ -12,7 +12,6 @@ use bevy::{
     DefaultPlugins,
 };
 use bevy_renet::{transport::NetcodeClientPlugin, RenetClientPlugin};
-use rand::Rng;
 use renet::{
     transport::{ClientAuthentication, NetcodeClientTransport},
     ClientId, ConnectionConfig, RenetClient,

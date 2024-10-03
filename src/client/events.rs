@@ -9,7 +9,9 @@ pub struct PlayerSpawnEvent(pub ClientId);
 pub struct PlayerDespawnEvent(pub ClientId);
 
 #[derive(Event)]
-pub struct PlayerMoveEvent(pub ClientId, pub [f32; 3]);
+//pub struct PlayerMoveEvent(pub ClientId, pub [f32; 3]);
+pub struct PlayerMoveEvent();
+
 
 #[derive(Event)]
 pub struct LobbySyncEvent(pub std::collections::HashMap<ClientId, PlayerAttributes>);

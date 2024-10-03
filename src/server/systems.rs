@@ -17,20 +17,6 @@ pub fn send_message_system(mut server: ResMut<RenetServer>, player_lobby: Res<Pl
     server.broadcast_message(chanel, message);
 }
 
-fn print_lobby(lobby: &PlayerLobby) {
-    //info!("Lobby:");
-    //info!("------");
-
-    
-
-    for (client_id, player) in lobby.0.iter() {
-        info!("Client {}: {:?}", client_id, player);
-    }
-    if lobby.0.is_empty() {
-      //  info!("Empty");
-        return;
-    }
-}
 
 pub fn receive_message_system(mut server: ResMut<RenetServer>, mut player_lobby: ResMut<PlayerLobby>) {
     for client_id in server.clients_id() {

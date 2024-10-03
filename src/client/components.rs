@@ -1,4 +1,4 @@
-use bevy::{ecs::component::Component, prelude::Event};
+use bevy::ecs::component::Component;
 use renet::ClientId;
 
 #[derive(Component)]
