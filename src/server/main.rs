@@ -9,7 +9,7 @@ use renet::{
     ConnectionConfig, RenetServer,
 };
 use systems::{handle_events_system, receive_message_system, send_message_system, setup_system};
-use resources::PlayerLobby;
+use resources::{ IsTakingBalise, IsTakingMap, PlayerLobby};
 
 mod systems;
 mod resources;
@@ -42,13 +42,15 @@ fn main() {
     };
     let transport = NetcodeServerTransport::new(server_config, socket).unwrap();
     app.insert_resource(transport);
+    app.insert_resource(IsTakingMap{map : None});
+    app.insert_resource(IsTakingBalise{balise : None});
 
     // game systems
     app.insert_resource(PlayerLobby(HashMap::default()));
 
     app.add_systems(Update, handle_events_system);
-    app.add_systems(Startup, setup_system);
     app.add_systems(Update, receive_message_system);
+    app.add_systems(Startup, setup_system);
     app.add_systems(Update, send_message_system);
     app.run();
 }

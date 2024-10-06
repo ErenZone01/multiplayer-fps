@@ -1,8 +1,19 @@
-use bevy::{ecs::{event::EventReader, system::{Res, ResMut}}, log::info};
-use multiplayer_demo::PlayerAttributes;
+use bevy::{
+    ecs::{
+        event::EventReader,
+        system::{Res, ResMut},
+    },
+    log::info,
+    prelude::{Color, Local},
+};
+use multiplayer_demo::{send_board, PlayerAttributes, ServerMessage};
+use rand::{seq::IteratorRandom, Rng};
 use renet::{DefaultChannel, RenetServer, ServerEvent};
 
-use crate::{resources::PlayerLobby, SERVER_ADDR};
+use crate::{
+    resources::{IsTakingBalise, IsTakingMap, PlayerLobby},
+    SERVER_ADDR,
+};
 
 pub fn setup_system() {
     info!("Server started on {}", SERVER_ADDR);
@@ -10,15 +21,18 @@ pub fn setup_system() {
 
 pub fn send_message_system(mut server: ResMut<RenetServer>, player_lobby: Res<PlayerLobby>) {
     let chanel = DefaultChannel::Unreliable;
-    let lobby: std::collections::HashMap<renet::ClientId, PlayerAttributes> = player_lobby.0.clone();
+    let lobby: std::collections::HashMap<renet::ClientId, PlayerAttributes> =
+        player_lobby.0.clone();
     let event = multiplayer_demo::ServerMessage::LobbySync(lobby);
     let message = bincode::serialize(&event).unwrap();
     //print_lobby(&player_lobby);
     server.broadcast_message(chanel, message);
 }
 
-
-pub fn receive_message_system(mut server: ResMut<RenetServer>, mut player_lobby: ResMut<PlayerLobby>) {
+pub fn receive_message_system(
+    mut server: ResMut<RenetServer>,
+    mut player_lobby: ResMut<PlayerLobby>,
+) {
     for client_id in server.clients_id() {
         let message = server.receive_message(client_id, DefaultChannel::Unreliable);
         if let Some(message) = message {
@@ -28,36 +42,126 @@ pub fn receive_message_system(mut server: ResMut<RenetServer>, mut player_lobby:
     }
 }
 
-// pub fn handle_events_system(
-//     server: ResMut<RenetServer>,
-//     mut lobby: ResMut<PlayerLobby>,
-// ) {
-//     // Parcourt les clients connectés
-//     for client_id in server.clients_id().iter() {
-//         if !lobby.0.contains_key(client_id) {
-//             // Si le client n'est pas déjà dans le lobby, on l'ajoute
-//             println!("Ajout du client {} au lobby.", client_id);
-//             lobby.0.insert(*client_id, multiplayer_demo::PlayerAttributes { position: [0.0,0.0,0.0] });
-//         }
-//     }
-// }
 
-pub fn handle_events_system(mut server: ResMut<RenetServer>, mut server_events: EventReader<ServerEvent>, mut player_lobby: ResMut<PlayerLobby>) {
+pub fn handle_events_system(
+    mut server: ResMut<RenetServer>,
+    mut server_events: EventReader<ServerEvent>,
+    mut player_lobby: ResMut<PlayerLobby>,
+    mut existing_colors: Local<Vec<Color>>, // Stocke les couleurs déjà utilisées
+    mut is_taking_map: ResMut<IsTakingMap>,  // Changement ici
+    mut is_taking_balise: ResMut<IsTakingBalise>, // Changement ici
+) {
+    
     for event in server_events.read() {
         match event {
             ServerEvent::ClientConnected { client_id } => {
                 println!("Client {client_id} connected");
-                player_lobby.0.insert(*client_id, PlayerAttributes { position: [0.0, 0.0, 0.0] });
-                let message = bincode::serialize(&multiplayer_demo::ServerMessage::PlayerJoin(*client_id)).unwrap();
-                server.broadcast_message_except(*client_id, DefaultChannel::ReliableOrdered, message);
+                let mut rng = rand::thread_rng();
+                let min_color_distance = 0.5;
+                
+                // Initialiser les valeurs par défaut
+                let random_map = is_taking_map.map.unwrap_or_else(|| {
+                    let map_value = rng.gen_range(0..=2);
+                    is_taking_map.map = Some(map_value); // Assurez-vous de mettre à jour ici
+                    map_value
+                });
+
+                let random_balise = is_taking_balise.balise.unwrap_or_else(|| {
+                    let balise_value = choose_position_balise(random_map);
+                    is_taking_balise.balise = Some(balise_value); // Assurez-vous de mettre à jour ici
+                    balise_value
+                });
+
+                // Génération de couleur
+                let random_color = loop {
+                    let color = Color::rgb(
+                        rng.gen_range(0.0..1.0),
+                        rng.gen_range(0.0..1.0),
+                        rng.gen_range(0.0..0.5),
+                    );
+                    if existing_colors.iter().all(|existing_color| {
+                        color_distance(&color, existing_color) > min_color_distance
+                    }) {
+                        existing_colors.push(color.clone());
+                        break color;
+                    }
+                };
+
+                player_lobby.0.insert(
+                    *client_id,
+                    PlayerAttributes {
+                        position: [0.0, 0.0, 0.0],
+                        color: random_color,
+                    },
+                );
+
+                // Envoi des messages
+                let player_join_message = bincode::serialize(&ServerMessage::PlayerJoin((*client_id, random_color))).unwrap_or_default();
+                let map_message = bincode::serialize(&ServerMessage::Map(random_map)).unwrap_or_default();
+                let balise_message = bincode::serialize(&ServerMessage::PosBalise(random_balise)).unwrap_or_default();
+
+                server.broadcast_message_except(*client_id, DefaultChannel::ReliableOrdered, player_join_message);
+                server.send_message(*client_id, DefaultChannel::ReliableOrdered, balise_message);
+                server.send_message(*client_id, DefaultChannel::ReliableOrdered, map_message);
+                info!("Tous les messages ont été envoyés.");
             }
+
             ServerEvent::ClientDisconnected { client_id, reason } => {
                 println!("Client {client_id} disconnected: {reason}");
                 player_lobby.0.remove(client_id);
-                let message = bincode::serialize(&multiplayer_demo::ServerMessage::PlayerLeave(*client_id)).unwrap();
-                server.broadcast_message(DefaultChannel::ReliableOrdered, message);
+
+                let player_leave_message = bincode::serialize(&ServerMessage::PlayerLeave(*client_id)).unwrap_or_default();
+                server.broadcast_message(DefaultChannel::ReliableOrdered, player_leave_message);
             }
         }
     }
 }
 
+// Fonction pour calculer la distance entre deux positions (utile pour éloigner la balise des joueurs)
+fn distance(p1: (usize, usize), p2: (usize, usize)) -> f32 {
+    let dx = p1.0 as f32 - p2.0 as f32;
+    let dz = p1.1 as f32 - p2.1 as f32;
+    (dx * dx + dz * dz).sqrt()
+}
+
+fn choose_position_balise(random_map: usize) -> (usize, usize) {
+    // Génération aléatoire de la balise (hors des murs et éloignée des joueurs)
+    let board = match random_map {
+        0 => send_board(),
+        1 => send_board(),
+        2 => send_board(),
+        _ => send_board(),
+    };
+    let valid_positions: Vec<(usize, usize)> = board
+        .iter()
+        .enumerate()
+        .flat_map(|(z, line)| {
+            line.iter().enumerate().filter_map(
+                move |(x, c)| {
+                    if *c == '0' {
+                        Some((x, z))
+                    } else {
+                        None
+                    }
+                },
+            )
+        })
+        .collect();
+    // Choisir une position aléatoire pour la balise, en s'assurant qu'elle est éloignée du joueur
+    let beacon_position = valid_positions
+        .iter()
+        .filter(|&&(x, z)| distance((0, 0), (x, z)) > 3.0)
+        .choose(&mut rand::thread_rng())
+        .expect("Aucune position valide pour la balise");
+    return *beacon_position;
+}
+
+// Fonction pour calculer la distance euclidienne entre deux couleurs
+fn color_distance(c1: &Color, c2: &Color) -> f32 {
+    let rgba1 = c1.as_rgba_f32(); // Tableau [f32; 4]
+    let rgba2 = c2.as_rgba_f32(); // Tableau [f32; 4]
+
+    // Calcul de la distance euclidienne sur les trois premières composantes (r, g, b)
+    ((rgba1[0] - rgba2[0]).powi(2) + (rgba1[1] - rgba2[1]).powi(2) + (rgba1[2] - rgba2[2]).powi(2))
+        .sqrt()
+}

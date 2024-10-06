@@ -7,3 +7,8 @@ use renet::ClientId;
 #[derive(Resource, Clone)]
 pub struct PlayerLobby(pub HashMap<ClientId, PlayerAttributes>);
 
+#[derive(Resource)]
+pub  struct  IsTakingBalise{ pub balise : Option<(usize, usize)>}
+#[derive(Resource)]
+pub  struct  IsTakingMap{ pub map : Option<usize>}
+

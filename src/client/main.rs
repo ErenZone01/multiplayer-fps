@@ -5,10 +5,13 @@ use std::{
 };
 
 use bevy::{
-    app::{App, Startup, Update},
+    app::{App, Update},
     log::info,
-    prelude::IntoSystemConfigs,
-    render::{camera::ClearColor, color::Color},
+    prelude::{in_state, IntoSystemConfigs, OnEnter},
+    render::{
+        camera::ClearColor,
+        color::{self, Color},
+    },
     DefaultPlugins,
 };
 use bevy_renet::{transport::NetcodeClientPlugin, RenetClientPlugin};
@@ -16,14 +19,15 @@ use renet::{
     transport::{ClientAuthentication, NetcodeClientTransport},
     ClientId, ConnectionConfig, RenetClient,
 };
-use multiplayer_demo::BOARD;
+use resources::{AppState, ButtonClicked, ColorOtherPlayer};
+use systems::{check_victory_system, get_connection_info, handle_button_click, setup_ui};
 //use systems::check_connection;
 use crate::{
-    resources::{MyClientId, PlayerEntities,Board},
+    resources::{MyClientId, PlayerEntities},
     systems::{
-        handle_lobby_sync_event_system, handle_player_spawn_event_system, receive_message_system,
-        rotation_player, send_message_system, setup_system,spawn_map_2d, update_player_movement_system,
-        mini_map_sync_event_system
+        handle_lobby_sync_event_system, handle_player_spawn_event_system,
+        mini_map_sync_event_system, receive_message_system, rotation_player, send_message_system,
+        setup_system, spawn_map_2d, update_player_movement_system,
     },
 };
 
@@ -33,13 +37,15 @@ mod resources;
 mod systems;
 
 fn main() {
+    //demander les informations du client
+    let connection_info = get_connection_info();
+
     let mut app = App::new();
-    // let mut colors : Vec<&str> = Vec::new();
-    // colors.push("FF00FF");
-    // colors.push("#bbCEcB");
-    // colors.push("FF00FF7F");
-    // let mut rng = rand::thread_rng();
-    // let index = rng.gen_range(0..3);
+    // Insérez ConnectionInfo comme ressource
+    app.insert_resource(connection_info);
+    // Add AppState
+    app.init_state::<AppState>();
+
     app.insert_resource(ClearColor(Color::hex("#bbCEcB").unwrap()));
     // base plugins
     app.add_plugins(RenetClientPlugin);
@@ -54,7 +60,8 @@ fn main() {
     app.insert_resource(MyClientId(ClientId::from_raw(client_id)));
     app.insert_resource(PlayerEntities(HashMap::new()));
 
-    app.insert_resource(Board{data:BOARD});
+    //app.insert_resource(Board { data: send_board() });
+
     let authentication = ClientAuthentication::Unsecure {
         server_addr: std::net::SocketAddr::V4(SocketAddrV4::new(
             std::net::Ipv4Addr::new(127, 0, 0, 1),
@@ -69,21 +76,42 @@ fn main() {
         .duration_since(SystemTime::UNIX_EPOCH)
         .unwrap();
     let transport = NetcodeClientTransport::new(current_time, authentication, socket).unwrap();
+
+    //initialise les ressources
     app.insert_resource(transport);
+    app.insert_resource(ColorOtherPlayer {
+        color: color::Color::WHITE,
+    });
+    app.insert_resource(ButtonClicked::default());
+
+    // // game systems
+    app.add_systems(Update, receive_message_system);
+    // Appeler setup_ui pour afficher l'interface de démarrage
+    app.add_systems(OnEnter(AppState::Menu), setup_ui);
+    app.add_systems(Update, handle_button_click.run_if(in_state(AppState::Menu)));
+    app.add_systems(
+        OnEnter(AppState::Setup),
+        (setup_system, spawn_map_2d).chain(),
+    );
+    app.add_systems(
+        Update,
+        (
+            handle_player_spawn_event_system,
+            send_message_system,
+            handle_lobby_sync_event_system,
+            (rotation_player, update_player_movement_system),
+            mini_map_sync_event_system,
+            check_victory_system,
+        )
+            .chain()
+            .run_if(in_state(AppState::Playing)),
+    );
 
     // game events
     app.add_event::<events::PlayerSpawnEvent>();
     app.add_event::<events::PlayerDespawnEvent>();
     app.add_event::<events::PlayerMoveEvent>();
     app.add_event::<events::LobbySyncEvent>();
-
-    
-    // game systems
-    app.add_systems(Update, (send_message_system,receive_message_system));
-    app.add_systems(Update, handle_player_spawn_event_system);
-    app.add_systems(Update, ((rotation_player, update_player_movement_system),mini_map_sync_event_system).chain());
-    app.add_systems(Update, handle_lobby_sync_event_system);
-    app.add_systems(Startup, (setup_system,spawn_map_2d).chain());
 
     info!("Client {} started", client_id);
 

@@ -1,12 +1,16 @@
+use std::io::{self, Write};
 
 use crate::{
-    components::{MiniMap, MiniMapCell, MiniPlayer, MyPlayer, PlayerEntity},
+    components::{
+        Beacon, ButtonTag, InitialImageTag, MiniMap, MiniMapCell, MiniPlayer, MyPlayer,
+        PlayerEntity, TextTag,
+    },
     events::{LobbySyncEvent, PlayerDespawnEvent, PlayerSpawnEvent},
-    resources::Board,
+    resources::{AppState, Board, ButtonClicked, ColorOtherPlayer, ConnectionInfo, PositionBalise},
     MyClientId,
 };
 use bevy::{
-    asset::Assets,
+    asset::{AssetServer, Assets},
     core_pipeline::core_3d::Camera3dBundle,
     ecs::{
         event::{EventReader, EventWriter},
@@ -16,108 +20,173 @@ use bevy::{
         keyboard::{KeyCode, KeyboardInput},
         mouse::MouseMotion,
     },
-    log::info,
+    log::{error, info, warn},
     math::{
-        primitives::{Cuboid, Plane3d, Sphere}, Vec3,
+        primitives::{Cuboid, Plane3d, Sphere},
+        Vec3,
     },
     pbr::{MaterialMeshBundle, StandardMaterial},
-    prelude::{default, BuildChildren, Local, NodeBundle, With},
-    render::{color::Color, mesh::Mesh},
+    prelude::{
+        default, BuildChildren, ButtonBundle, Camera, Camera2dBundle, Changed, Entity, ImageBundle,
+         NextState, NodeBundle, ParamSet, TextBundle, With,
+    },
+    render::{
+        color::{self, Color},
+        mesh::Mesh,
+    },
+    text::TextStyle,
     transform::components::Transform,
-    ui::{BackgroundColor, Style, Val},
+    ui::{
+        AlignItems, BackgroundColor, Interaction, JustifyContent, PositionType, Style, UiImage,
+        UiRect, Val,
+    },
 };
-use multiplayer_demo::PlayerAttributes;
-use rand::Rng;
+use multiplayer_demo::{send_board, PlayerAttributes};
 use renet::{DefaultChannel, RenetClient};
 
-// pub fn send_message_system(mut client: ResMut<RenetClient>, query: Query<(&MyPlayer, &Transform)>) {
-//     if client.is_disconnected() {
-//         panic!("<++++++++++++++++++++++++++++Client is disconnected to the server++++++++++++++++++++++++++++++++++++++++++>");
-//     }
-//     let (_, transform) = query.single();
-//     let player_sync = PlayerAttributes {
-//         position: transform.translation.into(),
-//     };
-//     let message = bincode::serialize(&player_sync).unwrap();
-//     client.send_message(DefaultChannel::Unreliable, message);
-// }
-
-pub fn send_message_system(
-    mut client: ResMut<RenetClient>,
-    query: Query<(&MyPlayer, &Transform)>,
-) {
+pub fn send_message_system(mut client: ResMut<RenetClient>, query: Query<(&MyPlayer, &Transform)>) {
     if client.is_disconnected() {
         panic!("Client is disconnected from the server");
     }
     let (_, transform) = query.single();
-    
+
     // Envoie uniquement la position du joueur local au serveur
     let player_sync = PlayerAttributes {
         position: transform.translation.into(),
+        color: color::Color::YELLOW,
     };
     let message = bincode::serialize(&player_sync).unwrap();
     client.send_message(DefaultChannel::Unreliable, message);
 }
 
-
 pub fn receive_message_system(
+    mut commands: Commands,
     mut client: ResMut<RenetClient>,
     mut spawn_events: EventWriter<PlayerSpawnEvent>,
     mut despawn_events: EventWriter<PlayerDespawnEvent>,
     mut lobby_sync_events: EventWriter<LobbySyncEvent>,
+    mut next_state: ResMut<NextState<AppState>>,
 ) {
+    // Boucle pour traiter les messages fiables
     while let Some(message) = client.receive_message(DefaultChannel::ReliableOrdered) {
-        let server_message = bincode::deserialize(&message).unwrap();
+        match bincode::deserialize::<multiplayer_demo::ServerMessage>(&message) {
+            Ok(server_message) => match server_message {
+                multiplayer_demo::ServerMessage::PlayerJoin((client_id, colors)) => {
+                    info!("Client connected: {}", client_id);
+                    spawn_events.send(PlayerSpawnEvent(client_id));
+                    commands.insert_resource(ColorOtherPlayer { color: colors });
+                }
+                multiplayer_demo::ServerMessage::PlayerLeave(client_id) => {
+                    info!("Client disconnected: {}", client_id);
+                    despawn_events.send(PlayerDespawnEvent(client_id));
+                }
+                multiplayer_demo::ServerMessage::Map(map_id) => {
+                    // Logique pour charger la carte
+                    info!("Received map_id: {}", map_id);
 
-        match server_message {
-            multiplayer_demo::ServerMessage::PlayerJoin(client_id) => {
-                info!("Client connected: {}", client_id);
-                spawn_events.send(PlayerSpawnEvent(client_id));
-            }
-            multiplayer_demo::ServerMessage::PlayerLeave(client_id) => {
-                info!("Client disconnected: {}", client_id);
-                despawn_events.send(PlayerDespawnEvent(client_id));
-                // client a supprimer ici cote frontend
-            }
-            _ => {
-                info!("Unhandled message: {:?}", server_message);
+                    let board_data = match map_id {
+                        0 => send_board(),
+                        1 => send_board(),
+                        2 => send_board(),
+                        _ => send_board(), // Gestion par défaut si map_id non reconnu
+                    };
+
+                    // Insérer la map dans les ressources
+                    commands.insert_resource(Board { data: board_data });
+                    //commands.insert_resource(ColorOtherPlayer{color : color_player});
+                    // Passer à l'état Playing une fois que la map est reçue
+                    next_state.set(AppState::Menu);
+                    info!("Map data has been inserted and state set to Playing.");
+                }
+                multiplayer_demo::ServerMessage::PosBalise(pos_balise) => {
+                    // Logique pour recevoir la position de la balise
+                    info!("Received balise position: {:?}", pos_balise);
+
+                    // Insérer la position de la balise dans les ressources
+                    commands.insert_resource(PositionBalise { pos: pos_balise });
+                }
+                _ => {
+                    // Pour les messages non gérés
+                    warn!("Unhandled message: {:?}", server_message);
+                }
+            },
+            Err(e) => {
+                // Gestion de l'erreur de désérialisation
+                error!("Failed to deserialize reliable message: {:?}", e);
             }
         }
     }
 
+    // Boucle pour traiter les messages non fiables
     while let Some(message) = client.receive_message(DefaultChannel::Unreliable) {
-        let message = bincode::deserialize(&message).unwrap();
-
-        match message {
-            multiplayer_demo::ServerMessage::LobbySync(map) => {
-                lobby_sync_events.send(LobbySyncEvent(map));
-            }
-            _ => {
-                info!("Unhandled message: {:?}", message);
+        match bincode::deserialize::<multiplayer_demo::ServerMessage>(&message) {
+            Ok(server_message) => match server_message {
+                multiplayer_demo::ServerMessage::LobbySync(map) => {
+                    lobby_sync_events.send(LobbySyncEvent(map));
+                }
+                _ => {
+                    warn!("Unhandled unreliable message: {:?}", server_message);
+                }
+            },
+            Err(e) => {
+                // Gestion de l'erreur de désérialisation pour les messages non fiables
+                error!("Failed to deserialize unreliable message: {:?}", e);
             }
         }
     }
 }
 
 pub fn update_player_movement_system(
-     map: Res<Board>,
+    map: Res<Board>,
     mut keyboard_events: EventReader<KeyboardInput>,
-    mut query: Query<(&mut Transform, &MyPlayer)>,
+    mut query: ParamSet<(
+        Query<(&mut Transform, &MyPlayer)>, // Paramètre 1 : Joueur
+        Query<&Transform, With<Camera>>,    // Paramètre 2 : Caméra
+    )>,
 ) {
-    let (mut transform, _) = query.single_mut();
+    // Taille du plateau
+    let board_width = map.data[0].len() as f32;
+    let board_height = map.data.len() as f32;
+
+    // Récupération de la rotation de la caméra
+    let binding = query.p1();
+    let camera_transform = binding.single();
+    let forward = camera_transform.forward(); // Direction avant
+    let right = camera_transform.right(); // Direction droite
+
+    // Récupération des informations du joueur
+    let mut binding = query.p0();
+    let (mut transform, _) = binding.single_mut();
+
+    // Fixer la hauteur à une constante pour rester au sol
+    let ground_level_y = 1.0;
 
     for event in keyboard_events.read() {
-        let mut delta_position = Vec3::new(0.0, 0.0, 0.0);
+        let mut delta_position = Vec3::ZERO;
 
+        // Ajuster les mouvements en fonction des touches pressées
         match event.key_code {
-            KeyCode::KeyW => delta_position.z += 0.1,
-            KeyCode::KeyS => delta_position.z -= 0.1,
-            KeyCode::KeyA => delta_position.x -= 0.1,
-            KeyCode::KeyD => delta_position.x += 0.1,
+            KeyCode::KeyW => delta_position += forward * 0.1, // Avancer
+            KeyCode::KeyS => delta_position -= forward * 0.1, // Reculer
+            KeyCode::KeyA => delta_position -= right * 0.1,   // Aller à gauche
+            KeyCode::KeyD => delta_position += right * 0.1,   // Aller à droite
             _ => {}
         }
-        let new_position = transform.translation + delta_position;
-        if !check_collision(map.data, new_position) {
+
+        // Calculer la nouvelle position
+        let mut new_position = transform.translation + delta_position;
+
+        // S'assurer que le joueur reste à la hauteur du sol
+        new_position.y = ground_level_y;
+
+        // Limiter les mouvements du joueur aux dimensions du plateau
+        new_position.x = new_position.x.clamp(-board_width / 2.0, board_width / 2.0);
+        new_position.z = new_position
+            .z
+            .clamp(-board_height / 2.0, board_height / 2.0);
+
+        // Vérifier les collisions avant de mettre à jour la position
+        if !check_collision(map.data.clone(), new_position) {
             transform.translation = new_position;
         }
     }
@@ -134,12 +203,15 @@ pub fn setup_system(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     board: Res<Board>,
+    position_balise: Res<PositionBalise>,
     client: ResMut<RenetClient>,
+    mut next_state: ResMut<NextState<AppState>>,
 ) {
     if client.is_disconnected() {
         panic!("disconnected : Client is not connected to the server");
     }
-    // let position=rand_position_player(&board);
+
+    // Création de la caméra et du joueur
     commands
         .spawn((
             Camera3dBundle {
@@ -159,13 +231,19 @@ pub fn setup_system(
                 ..default()
             });
         });
-    // world start
+
+    // Création du sol
+    let board_width = board.data[0].len() as f32;
+    let board_height = board.data.len() as f32;
+
     commands.spawn(MaterialMeshBundle {
         material: materials.add(StandardMaterial::default()),
         mesh: meshes.add(Plane3d::default()),
-        transform: Transform::from_scale(Vec3::splat(7.0)),
+        transform: Transform::from_scale(Vec3::new(board_width, 1.0, board_height)),
         ..default()
     });
+
+    // Génération des murs
     for (z, line) in board.data.iter().enumerate() {
         for (x, c) in line.iter().enumerate() {
             if *c == '0' {
@@ -176,7 +254,6 @@ pub fn setup_system(
                         base_color: Color::rgb(0.0, 0.0, 1.0),
                         ..default()
                     }),
-                    // mesh: meshes.add(Plane3d::default()),
                     mesh: meshes.add(Cuboid::new(1.0, 3.0, 1.0)),
                     transform: Transform::from_xyz(-(x as f32) + 7.0, 0.0, z as f32 - 7.0),
                     ..default()
@@ -184,7 +261,46 @@ pub fn setup_system(
             }
         }
     }
-    // world end
+
+    // Création de la balise
+    let _ = commands
+        .spawn(MaterialMeshBundle {
+            material: materials.add(StandardMaterial {
+                base_color: Color::rgb(1.0, 0.0, 0.0), // Couleur rouge pour la balise
+                ..default()
+            }),
+            mesh: meshes.add(Sphere::new(0.3)), // Une petite sphère représente la balise
+            transform: Transform::from_xyz(
+                -(position_balise.pos.0 as f32) + 7.0,
+                0.5,
+                position_balise.pos.1 as f32 - 7.0,
+            ),
+            ..default()
+        })
+        .insert(Beacon)
+        .id(); // Insertion du composant `Beacon`
+
+    // Passer à l'état Playing une fois que la map est reçue
+    next_state.set(AppState::Playing);
+    info!("setup create");
+}
+
+pub fn check_victory_system(
+    query_players: Query<&Transform, With<MyPlayer>>,
+    query_beacon: Query<&Transform, With<Beacon>>,
+) {
+    let beacon_transform = query_beacon.single();
+
+    for player_transform in query_players.iter() {
+        let distance = player_transform
+            .translation
+            .distance(beacon_transform.translation);
+
+        if distance < 1.0 {
+            println!("Victoire ! Le joueur a trouvé la balise !");
+            // Ajoute ici la logique pour gérer la victoire (exemple : fin de la partie)
+        }
+    }
 }
 
 pub fn spawn_map_2d(
@@ -260,67 +376,33 @@ pub fn spawn_map_2d(
         });
 }
 
-
-// Fonction pour calculer la distance euclidienne entre deux couleurs
-fn color_distance(c1: &Color, c2: &Color) -> f32 {
-    let rgba1 = c1.as_rgba_f32(); // Tableau [f32; 4]
-    let rgba2 = c2.as_rgba_f32(); // Tableau [f32; 4]
-
-    // Calcul de la distance euclidienne sur les trois premières composantes (r, g, b)
-    ((rgba1[0] - rgba2[0]).powi(2) + (rgba1[1] - rgba2[1]).powi(2) + (rgba1[2] - rgba2[2]).powi(2)).sqrt()
-}
-
-
-
-
 pub fn handle_player_spawn_event_system(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut spawn_events: EventReader<PlayerSpawnEvent>,
-    mut existing_colors: Local<Vec<Color>>, // Stocke les couleurs déjà utilisées
+    mut despawn_events: EventReader<PlayerDespawnEvent>,
+    color: Res<ColorOtherPlayer>,
 ) {
-    let mut rng = rand::thread_rng();
-
-    // Valeur de distance minimale entre les couleurs
-    let min_color_distance = 0.5; // Ajustable pour plus de distinction
+    for event in despawn_events.read(){
+        info!(
+            "Handling player spawn event: {:?} color : {:?}",
+            event.0, color
+        );
+    }
 
     for event in spawn_events.read() {
-        info!("Handling player spawn event: {:?}", event.0);
+        info!(
+            "Handling player spawn event: {:?} color : {:?}",
+            event.0, color
+        );
         let client_id = event.0;
-
-        let mut random_color;
-        let mut attempts = 0;
-
-        loop {
-            // Générer une couleur aléatoire
-            random_color = Color::rgb(
-                rng.gen_range(0.0..1.0), // Composante rouge
-                rng.gen_range(0.0..1.0), // Composante verte
-                rng.gen_range(0.0..0.5), // Limite le bleu pour éviter le bleu foncé
-            );
-
-            // Vérifier que la couleur est suffisamment différente des autres
-            let is_unique = existing_colors.iter().all(|existing_color| {
-                color_distance(&random_color, existing_color) > min_color_distance
-            });
-            
-
-            // Sortir de la boucle si la couleur est unique et non bleu foncé
-            if is_unique || attempts > 10 {
-                break;
-            }
-            attempts += 1;
-        }
-
-        // Ajouter la couleur générée à la liste des couleurs existantes
-        existing_colors.push(random_color.clone());
 
         // Créer le joueur avec la couleur générée
         commands.spawn((
             MaterialMeshBundle {
                 material: materials.add(StandardMaterial {
-                    base_color: random_color, // Applique la couleur générée
+                    base_color: color.color, // Applique la couleur générée
                     ..default()
                 }),
                 mesh: meshes.add(Cuboid::new(0.2, 0.2, 0.2)), // Taille du cube du joueur
@@ -330,39 +412,6 @@ pub fn handle_player_spawn_event_system(
         ));
     }
 }
-
-// pub fn handle_lobby_sync_event_system(
-//     mut spawn_events: EventWriter<PlayerSpawnEvent>,
-//     mut sync_events: EventReader<LobbySyncEvent>,
-//     mut query: Query<(&PlayerEntity, &mut Transform)>,
-//     my_clinet_id: Res<MyClientId>,
-// ) {
-//     let event_option = sync_events.read().last();
-//     if event_option.is_none() {
-//         return;
-//     }
-//     let event = event_option.unwrap();
-
-//     for (client_id, player_sync) in event.0.iter() {
-//         if *client_id == my_clinet_id.0 {
-//             continue;
-//         }
-
-//         let mut found = false;
-//         for (player_entity, mut transform) in query.iter_mut() {
-//             if *client_id == player_entity.0 {
-//                 let new_position = player_sync.position;
-//                 transform.translation = new_position.into();
-//                 found = true;
-//             }
-//         }
-
-//         if !found {
-//             info!("Spawning player {}: {:?}", client_id, player_sync.position);
-//             spawn_events.send(PlayerSpawnEvent(*client_id));
-//         }
-//     }
-// }
 
 pub fn handle_lobby_sync_event_system(
     mut spawn_events: EventWriter<PlayerSpawnEvent>,
@@ -375,13 +424,11 @@ pub fn handle_lobby_sync_event_system(
         return;
     }
     let event = event_option.unwrap();
-
     for (client_id, player_sync) in event.0.iter() {
         // Ne pas mettre à jour la position du joueur local
         if *client_id == my_client_id.0 {
             continue;
         }
-
         // Mettre à jour la position des autres joueurs
         let mut found = false;
         for (player_entity, mut transform) in query.iter_mut() {
@@ -392,7 +439,6 @@ pub fn handle_lobby_sync_event_system(
                 found = true;
             }
         }
-
         // Si le joueur n'existe pas encore, le spawn
         if !found {
             info!("Spawning player {}: {:?}", client_id, player_sync.position);
@@ -400,8 +446,6 @@ pub fn handle_lobby_sync_event_system(
         }
     }
 }
-
-
 pub fn mini_map_sync_event_system(
     player_3_d: Query<&mut Transform, With<MyPlayer>>,
     board: Res<Board>,
@@ -412,11 +456,9 @@ pub fn mini_map_sync_event_system(
     let xp = (-transform.translation[0].round() + 7.0) * cell;
     let zp = (transform.translation[2].round() + 7.0) * cell;
     let mut style = mini_player.single_mut();
-
     style.left = Val::Px(xp);
     style.top = Val::Px(zp);
 }
-
 pub fn rotation_player(
     mut query: Query<&mut Transform, With<MyPlayer>>,
     mut mouse_event: EventReader<MouseMotion>,
@@ -438,7 +480,6 @@ pub fn rotation_player(
         transform.rotate_local_x(-y * 0.002);
     }
 }
-
 // fn rand_position_player(board: &Res<Board>) -> Vec3 {
 //     let mut rng = rand::thread_rng();
 //     loop {
@@ -450,31 +491,175 @@ pub fn rotation_player(
 //     }
 // }
 
-fn check_collision(map: [[char; 15]; 15], position: Vec3) -> bool {
+fn check_collision(map: Vec<Vec<char>>, position: Vec3) -> bool {
     let x = (-position.x + 7.0).round() as usize;
     let z = (position.z + 7.0).round() as usize;
-    
-    if x >= 15 || z >= 15 {
+
+    if x >= map[0].len() || z >= map.len() {
         return true; // Out of bounds, consider it a collision
     }
-    
+
     //println!("Checking collision at x = {}, z = {}", x, z);
     map[z][x] == '1'
 }
 
-// fn check_collision(map: [[char; 15]; 15], position: Vec3) -> bool {
-//     let (x, z) = (
-//         (-position.x + 7.1).powi(2).sqrt() as usize,
-//         (position.z + 7.1).powi(2).sqrt() as usize,
-//     );
-//     println!("new_x ==> {} and new_z ==> {} and bool ==>", x, z);
-//     map[x][z] == '1'
-// }
+// Système pour configurer l'UI initiale
+pub fn setup_ui(mut commands: Commands, asset_server: Res<AssetServer>) {
+    commands.spawn(Camera2dBundle::default());
 
-// pub fn check_connection(client: Res<RenetClient>) {
-//     if client.is_connected() {
-//         println!("Client is connected to the server");
-//     } else {
-//         println!(" checkconnection : Client is not connected to the server");
-//     }
-// }
+    // Affichage de l'image initiale et du bouton "PLAY"
+    commands
+        .spawn(NodeBundle {
+            style: Style {
+                width: Val::Percent(100.0),
+                height: Val::Percent(100.0),
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .with_children(|parent| {
+            // Image initiale
+            parent.spawn((
+                ImageBundle {
+                    style: Style {
+                        width: Val::Percent(100.0),
+                        height: Val::Percent(100.0),
+                        ..Default::default()
+                    },
+                    image: UiImage::new(asset_server.load("images/image.png")),
+                    ..Default::default()
+                },
+                InitialImageTag,
+            ));
+
+            // Node pour centrer le bouton
+            parent
+                .spawn(NodeBundle {
+                    style: Style {
+                        width: Val::Percent(100.0),
+                        height: Val::Percent(100.0),
+                        justify_content: JustifyContent::Center,
+                        align_items: AlignItems::Center,
+                        position_type: PositionType::Absolute,
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                })
+                .with_children(|parent| {
+                    // Bouton Play
+                    parent
+                        .spawn((
+                            ButtonBundle {
+                                style: Style {
+                                    width: Val::Px(150.0),
+                                    height: Val::Px(65.0),
+                                    margin: UiRect::all(Val::Px(20.0)),
+                                    justify_content: JustifyContent::Center,
+                                    align_items: AlignItems::Center,
+                                    position_type: PositionType::Absolute,
+                                    ..Default::default()
+                                },
+                                background_color: Color::rgb(0.15, 0.15, 0.15).into(),
+                                ..Default::default()
+                            },
+                            ButtonTag,
+                        ))
+                        .with_children(|parent| {
+                            // Texte du bouton
+                            parent.spawn((
+                                TextBundle::from_section(
+                                    "PLAY",
+                                    TextStyle {
+                                        font: asset_server
+                                            .load("fonts/FiraSansExtraCondensed-Black.ttf"),
+                                        font_size: 40.0,
+                                        color: Color::WHITE,
+                                    },
+                                ),
+                                TextTag, // Tag pour identifier le texte
+                            ));
+                        });
+                });
+        });
+}
+
+// Système pour gérer le clic sur le bouton "PLAY"
+pub fn handle_button_click(
+    mut commands: Commands,
+    mut interaction_query: Query<(&Interaction, Entity), (Changed<Interaction>, With<ButtonTag>)>,
+    image_query: Query<Entity, With<InitialImageTag>>,
+    text_query: Query<(Entity, &TextTag)>,
+    mut button_clicked: ResMut<ButtonClicked>,
+    mut next_state: ResMut<NextState<AppState>>,
+    camera_query: Query<Entity, With<Camera>>, // Ajout de cette Query pour cibler la caméra
+) {
+    for (interaction, button_entity) in &mut interaction_query {
+        if *interaction == Interaction::Pressed && !button_clicked.0 {
+            // Supprimer le bouton "PLAY" et l'image initiale
+            commands.entity(button_entity).despawn();
+            for entity in image_query.iter() {
+                commands.entity(entity).despawn();
+            }
+
+            for (text_entity, _) in text_query.iter() {
+                commands.entity(text_entity).despawn();
+            }
+
+            // Supprimer la caméra
+            for camera_entity in camera_query.iter() {
+                commands.entity(camera_entity).despawn();
+            }
+            // ici met toutes fonctions pour le commencement du jeu
+
+            button_clicked.0 = true; // Mettre à jour l'état pour indiquer que le bouton a été cliqué
+            next_state.set(AppState::Setup);
+        }
+    }
+}
+
+
+pub fn get_connection_info() -> ConnectionInfo {
+    let server_addr = loop {
+        let mut input = String::new();
+        print!("Entrez l'adresse IP du serveur (ex: 127.0.0.1:5000) ou appuyez sur Entrée pour jouer en solo: ");
+        io::stdout().flush().unwrap();
+        io::stdin().read_line(&mut input).unwrap();
+
+        let trimmed = input.trim();
+        if trimmed.is_empty() {
+            println!("Mode solo activé. Vous jouerez localement.");
+            break "127.0.0.1:5000".parse().unwrap(); // Adresse locale par défaut
+        }
+
+        match trimmed.parse() {
+            Ok(addr) => break addr,
+            Err(_) => {
+                println!("Adresse IP invalide. Veuillez réessayer.");
+                continue;
+            }
+        };
+    };
+
+    let username = loop {
+        let mut input = String::new();
+        print!("Entrez votre nom d'utilisateur (max 255 caractères): ");
+        io::stdout().flush().unwrap();
+        io::stdin().read_line(&mut input).unwrap();
+
+        let trimmed = input.trim();
+        if trimmed.is_empty() {
+            println!("Le nom d'utilisateur ne peut pas être vide. Veuillez réessayer.");
+            continue;
+        }
+        if trimmed.len() > 255 {
+            println!(
+                "Le nom d'utilisateur est trop long (max 255 caractères). Veuillez réessayer."
+            );
+            continue;
+        }
+        break trimmed.to_string();
+    };
+    ConnectionInfo::new(server_addr, username)
+}
