@@ -57,6 +57,15 @@ pub fn send_message_system(mut client: ResMut<RenetClient>, query: Query<(&MyPla
     client.send_message(DefaultChannel::Unreliable, message);
 }
 
+pub fn send_message_game_over(mut client: ResMut<RenetClient>, query: Query<(&MyPlayer, &Transform)>) {
+    let _ = query;
+    if client.is_disconnected() {
+        panic!("Client is disconnected from the server");
+    }
+    let message = bincode::serialize("Gameover").unwrap();
+    client.send_message(DefaultChannel::ReliableOrdered, message);
+}
+
 pub fn receive_message_system(
     mut commands: Commands,
     mut client: ResMut<RenetClient>,
@@ -102,6 +111,9 @@ pub fn receive_message_system(
 
                     // Insérer la position de la balise dans les ressources
                     commands.insert_resource(PositionBalise { pos: pos_balise });
+                }
+                multiplayer_demo::ServerMessage::GameOver(_)=>{
+                    next_state.set(AppState::Lose);
                 }
                 _ => {
                     // Pour les messages non gérés
@@ -326,6 +338,32 @@ pub fn setup_game_over(mut commands: Commands) {
             ));
         });
 }
+
+pub fn setup_game_over_lose(mut commands: Commands) {
+    commands
+        .spawn(NodeBundle {
+            style: Style {
+                width: Val::Percent(100.0),
+                height: Val::Percent(100.0),
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                ..default()
+            },
+            background_color: Color::BLACK.into(),
+            ..default()
+        })
+        .with_children(|parent| {
+            parent.spawn(TextBundle::from_section(
+                "You lose",
+                TextStyle {
+                    font_size: 50.0,
+                    color: Color::WHITE,
+                    ..default()
+                },
+            ));
+        });
+}
+
 
 pub fn spawn_map_2d(
     mut commands: Commands,

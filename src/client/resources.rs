@@ -37,7 +37,8 @@ pub enum AppState {
     Setup,
     Menu,
     ConnectToServer,
-    GameOver
+    GameOver,
+    Lose
 }
 
 impl Default for AppState {

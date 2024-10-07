@@ -12,7 +12,7 @@ use bevy_renet::{transport::NetcodeClientPlugin, RenetClientPlugin};
 
 use resources::{AppState, ButtonClicked, ColorOtherPlayer};
 use systems::{
-    check_victory_system, connect_to_server, get_connection_info, handle_button_click, setup, setup_game_over, setup_ui, update_fps
+    check_victory_system, connect_to_server, get_connection_info, handle_button_click, send_message_game_over, setup, setup_game_over, setup_game_over_lose, setup_ui, update_fps
 };
 //use systems::check_connection;
 use crate::{
@@ -93,6 +93,9 @@ fn main() {
             .run_if(in_state(AppState::Playing)),
     );
     app.add_systems(OnEnter(AppState::GameOver), setup_game_over);
+    app.add_systems(OnEnter(AppState::Lose), setup_game_over_lose);
+
+    app.add_systems(OnEnter(AppState::GameOver), send_message_game_over);
 
     // game events
     app.add_event::<events::PlayerSpawnEvent>();

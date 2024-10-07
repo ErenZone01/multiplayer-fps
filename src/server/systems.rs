@@ -34,31 +34,36 @@ pub fn receive_message_system(
     mut player_lobby: ResMut<PlayerLobby>,
 ) {
     for client_id in server.clients_id() {
+        //mettre a jours la position des joueurs
         let message = server.receive_message(client_id, DefaultChannel::Unreliable);
         if let Some(message) = message {
             let player: PlayerAttributes = bincode::deserialize(&message).unwrap();
             player_lobby.0.insert(client_id, player);
         }
+        let message2 = server.receive_message(client_id, DefaultChannel::ReliableOrdered);
+        if let Some(_) = message2 {
+            // Envoi des messages
+            let msg = bincode::serialize(&ServerMessage::GameOver(client_id)).unwrap_or_default();
+            server.broadcast_message_except(client_id, DefaultChannel::ReliableOrdered, msg);
+        }
     }
 }
-
 
 pub fn handle_events_system(
     mut server: ResMut<RenetServer>,
     mut server_events: EventReader<ServerEvent>,
     mut player_lobby: ResMut<PlayerLobby>,
     mut existing_colors: Local<Vec<Color>>, // Stocke les couleurs déjà utilisées
-    mut is_taking_map: ResMut<IsTakingMap>,  // Changement ici
+    mut is_taking_map: ResMut<IsTakingMap>, // Changement ici
     mut is_taking_balise: ResMut<IsTakingBalise>, // Changement ici
 ) {
-    
     for event in server_events.read() {
         match event {
             ServerEvent::ClientConnected { client_id } => {
                 println!("Client {client_id} connected");
                 let mut rng = rand::thread_rng();
                 let min_color_distance = 0.5;
-                
+
                 // Initialiser les valeurs par défaut
                 let random_map = is_taking_map.map.unwrap_or_else(|| {
                     let map_value = rng.gen_range(0..=2);
@@ -96,11 +101,19 @@ pub fn handle_events_system(
                 );
 
                 // Envoi des messages
-                let player_join_message = bincode::serialize(&ServerMessage::PlayerJoin((*client_id, random_color))).unwrap_or_default();
-                let map_message = bincode::serialize(&ServerMessage::Map(random_map)).unwrap_or_default();
-                let balise_message = bincode::serialize(&ServerMessage::PosBalise(random_balise)).unwrap_or_default();
+                let player_join_message =
+                    bincode::serialize(&ServerMessage::PlayerJoin((*client_id, random_color)))
+                        .unwrap_or_default();
+                let map_message =
+                    bincode::serialize(&ServerMessage::Map(random_map)).unwrap_or_default();
+                let balise_message = bincode::serialize(&ServerMessage::PosBalise(random_balise))
+                    .unwrap_or_default();
 
-                server.broadcast_message_except(*client_id, DefaultChannel::ReliableOrdered, player_join_message);
+                server.broadcast_message_except(
+                    *client_id,
+                    DefaultChannel::ReliableOrdered,
+                    player_join_message,
+                );
                 server.send_message(*client_id, DefaultChannel::ReliableOrdered, balise_message);
                 server.send_message(*client_id, DefaultChannel::ReliableOrdered, map_message);
                 info!("Tous les messages ont été envoyés.");
@@ -110,7 +123,8 @@ pub fn handle_events_system(
                 println!("Client {client_id} disconnected: {reason}");
                 player_lobby.0.remove(client_id);
 
-                let player_leave_message = bincode::serialize(&ServerMessage::PlayerLeave(*client_id)).unwrap_or_default();
+                let player_leave_message =
+                    bincode::serialize(&ServerMessage::PlayerLeave(*client_id)).unwrap_or_default();
                 server.broadcast_message(DefaultChannel::ReliableOrdered, player_leave_message);
             }
         }
