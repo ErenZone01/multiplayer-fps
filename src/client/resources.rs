@@ -1,7 +1,7 @@
-use std::{collections::HashMap, net::SocketAddr};
+use std::net::SocketAddr;
 
 use bevy::{
-    ecs::{entity::Entity, system::Resource},
+    ecs::system::Resource,
     prelude::{Color, States},
 };
 use renet::ClientId;
@@ -9,8 +9,8 @@ use renet::ClientId;
 #[derive(Resource)]
 pub struct MyClientId(pub ClientId);
 
-#[derive(Resource)]
-pub struct PlayerEntities(pub HashMap<ClientId, Entity>);
+// #[derive(Resource)]
+// pub struct PlayerEntities(pub HashMap<ClientId, Entity>);
 
 #[derive(Resource)]
 // Définir BOARD comme une ressource
@@ -29,24 +29,27 @@ pub struct ColorOtherPlayer {
     pub color: Color, // ou tout autre type
 }
 
+
 #[derive(Debug, Clone, Eq, PartialEq, Hash, States)]
 pub enum AppState {
     WaitingForMap,
     Playing,
     Setup,
-    Menu
+    Menu,
+    ConnectToServer,
+    GameOver
 }
 
 impl Default for AppState {
     fn default() -> Self {
-        AppState::WaitingForMap
+        AppState::ConnectToServer
     }
 }
 
 #[derive(Resource, Default)]
 pub struct ButtonClicked(pub bool);
 
-#[derive(Resource)]
+#[derive(Resource, Clone)]
 pub struct ConnectionInfo {
     pub server_addr: SocketAddr,
     pub username: String,

@@ -1,48 +1,46 @@
-use std::io::{self, Write};
+use std::{
+    // collections::HashMap,
+    io::{self, Write},
+    net::UdpSocket,
+    time::SystemTime,
+};
 
 use crate::{
     components::{
-        Beacon, ButtonTag, InitialImageTag, MiniMap, MiniMapCell, MiniPlayer, MyPlayer,
-        PlayerEntity, TextTag,
+        Beacon, ButtonTag, FpsText, InitialImageTag, MiniMap, MiniMapCell, MiniPlayer, MyPlayer, PlayerEntity, TextTag
     },
     events::{LobbySyncEvent, PlayerDespawnEvent, PlayerSpawnEvent},
-    resources::{AppState, Board, ButtonClicked, ColorOtherPlayer, ConnectionInfo, PositionBalise},
+    resources::{
+        AppState, Board, ButtonClicked, ColorOtherPlayer, ConnectionInfo, PositionBalise
+    },
     MyClientId,
 };
 use bevy::{
-    asset::{AssetServer, Assets},
-    core_pipeline::core_3d::Camera3dBundle,
-    ecs::{
+    asset::{AssetServer, Assets}, core_pipeline::core_3d::Camera3dBundle, diagnostic::FrameTimeDiagnosticsPlugin, ecs::{
         event::{EventReader, EventWriter},
         system::{Commands, Query, Res, ResMut},
-    },
-    input::{
+    }, input::{
         keyboard::{KeyCode, KeyboardInput},
         mouse::MouseMotion,
-    },
-    log::{error, info, warn},
-    math::{
+    }, log::{error, info, warn}, math::{
         primitives::{Cuboid, Plane3d, Sphere},
         Vec3,
-    },
-    pbr::{MaterialMeshBundle, StandardMaterial},
-    prelude::{
-        default, BuildChildren, ButtonBundle, Camera, Camera2dBundle, Changed, Entity, ImageBundle,
-         NextState, NodeBundle, ParamSet, TextBundle, With,
-    },
-    render::{
+    }, pbr::{MaterialMeshBundle, StandardMaterial}, prelude::{
+        default, BuildChildren, ButtonBundle, Camera, Camera2dBundle, Changed, Entity,
+        ImageBundle, NextState, NodeBundle, ParamSet, TextBundle, With,
+    }, render::{
         color::{self, Color},
         mesh::Mesh,
-    },
-    text::TextStyle,
-    transform::components::Transform,
-    ui::{
+    }, text::{Text, TextStyle}, transform::components::Transform, ui::{
         AlignItems, BackgroundColor, Interaction, JustifyContent, PositionType, Style, UiImage,
         UiRect, Val,
-    },
+    }
 };
 use multiplayer_demo::{send_board, PlayerAttributes};
-use renet::{DefaultChannel, RenetClient};
+use renet::{
+    transport::{ClientAuthentication, NetcodeClientTransport},
+    ClientId, ConnectionConfig, DefaultChannel, RenetClient,
+};
 
 pub fn send_message_system(mut client: ResMut<RenetClient>, query: Query<(&MyPlayer, &Transform)>) {
     if client.is_disconnected() {
@@ -288,6 +286,7 @@ pub fn setup_system(
 pub fn check_victory_system(
     query_players: Query<&Transform, With<MyPlayer>>,
     query_beacon: Query<&Transform, With<Beacon>>,
+    mut next_state: ResMut<NextState<AppState>>,
 ) {
     let beacon_transform = query_beacon.single();
 
@@ -298,9 +297,34 @@ pub fn check_victory_system(
 
         if distance < 1.0 {
             println!("Victoire ! Le joueur a trouvé la balise !");
+            next_state.set(AppState::GameOver)
             // Ajoute ici la logique pour gérer la victoire (exemple : fin de la partie)
         }
     }
+}
+pub fn setup_game_over(mut commands: Commands) {
+    commands
+        .spawn(NodeBundle {
+            style: Style {
+                width: Val::Percent(100.0),
+                height: Val::Percent(100.0),
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                ..default()
+            },
+            background_color: Color::BLACK.into(),
+            ..default()
+        })
+        .with_children(|parent| {
+            parent.spawn(TextBundle::from_section(
+                "You win",
+                TextStyle {
+                    font_size: 50.0,
+                    color: Color::WHITE,
+                    ..default()
+                },
+            ));
+        });
 }
 
 pub fn spawn_map_2d(
@@ -384,7 +408,7 @@ pub fn handle_player_spawn_event_system(
     mut despawn_events: EventReader<PlayerDespawnEvent>,
     color: Res<ColorOtherPlayer>,
 ) {
-    for event in despawn_events.read(){
+    for event in despawn_events.read() {
         info!(
             "Handling player spawn event: {:?} color : {:?}",
             event.0, color
@@ -619,17 +643,16 @@ pub fn handle_button_click(
     }
 }
 
-
 pub fn get_connection_info() -> ConnectionInfo {
     let server_addr = loop {
         let mut input = String::new();
-        print!("Entrez l'adresse IP du serveur (ex: 127.0.0.1:5000) ou appuyez sur Entrée pour jouer en solo: ");
+        print!("Entrez l'adresse IP du serveur (ex: 127.0.0.1:5000) ou appuyez sur Entrée directement pour jouer en local : ");
         io::stdout().flush().unwrap();
         io::stdin().read_line(&mut input).unwrap();
 
         let trimmed = input.trim();
         if trimmed.is_empty() {
-            println!("Mode solo activé. Vous jouerez localement.");
+            println!("Vous jouerez localement.");
             break "127.0.0.1:5000".parse().unwrap(); // Adresse locale par défaut
         }
 
@@ -644,13 +667,13 @@ pub fn get_connection_info() -> ConnectionInfo {
 
     let username = loop {
         let mut input = String::new();
-        print!("Entrez votre nom d'utilisateur (max 255 caractères): ");
+        print!("Entrez votre pseudo (ne depassant pas 255 caractères): ");
         io::stdout().flush().unwrap();
         io::stdin().read_line(&mut input).unwrap();
 
         let trimmed = input.trim();
         if trimmed.is_empty() {
-            println!("Le nom d'utilisateur ne peut pas être vide. Veuillez réessayer.");
+            println!("Le pseudo ne peut pas être vide. Veuillez réessayer.");
             continue;
         }
         if trimmed.len() > 255 {
@@ -662,4 +685,95 @@ pub fn get_connection_info() -> ConnectionInfo {
         break trimmed.to_string();
     };
     ConnectionInfo::new(server_addr, username)
+}
+
+pub fn connect_to_server(
+    mut commands: Commands,
+    connection_info: Res<ConnectionInfo>,
+    mut next_state: ResMut<NextState<AppState>>,
+) {
+    // renet client
+    let client = RenetClient::new(ConnectionConfig::default());
+    commands.insert_resource(client);
+
+    let client_id = rand::random::<u64>();
+    commands.insert_resource(MyClientId(ClientId::from_raw(client_id)));
+    //commands.insert_resource(PlayerEntities(HashMap::new()));
+
+    let mut user_data = [0u8; 256];
+    let username_bytes = connection_info.username.as_bytes();
+    user_data[..username_bytes.len().min(255)]
+        .copy_from_slice(&username_bytes[..username_bytes.len().min(255)]);
+
+    let authentication = ClientAuthentication::Unsecure {
+        server_addr: connection_info.server_addr,
+        client_id,
+        user_data: Some(user_data),
+        protocol_id: 0,
+    };
+    let socket = UdpSocket::bind("0.0.0.0:0").unwrap();
+    let current_time = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap();
+    let transport = NetcodeClientTransport::new(current_time, authentication, socket).unwrap();
+
+    //initialise les ressources
+    commands.insert_resource(transport);
+    next_state.set(AppState::WaitingForMap);
+}
+
+
+
+use bevy::diagnostic::DiagnosticsStore;
+
+// Système de mise à jour des FPS
+pub fn update_fps(diagnostics: Res<DiagnosticsStore>, mut query: Query<&mut Text, With<FpsText>>) {
+    // Récupère les FPS via DiagnosticsStore
+    if let Some(fps) = diagnostics.get(&FrameTimeDiagnosticsPlugin::FPS).and_then(|fps| fps.average()) {
+        for mut text in query.iter_mut() {
+            text.sections[0].value = format!("FPS: {:.0}", fps); // Met à jour le texte avec les FPS
+        }
+    }
+}
+
+// Système d'initialisation pour configurer l'affichage des FPS
+pub fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
+    // Ici, pas besoin d'ajouter de caméra, ta caméra 3D existante sera utilisée pour tout.
+
+     // Ajoute une caméra 2D pour le texte, avec un ordre explicite pour éviter les ambiguïtés
+     commands.spawn((
+        Camera2dBundle {
+            camera: Camera {
+                order: 2, // Priorité explicite de la caméra
+                ..default()
+            },
+            ..default()
+        },
+    ));
+
+    // Création du texte des FPS (cela sera rendu dans le coin supérieur droit)
+    commands.spawn((
+        TextBundle {
+            text: Text::from_section(
+                "FPS:".to_string(), // Texte initial
+                TextStyle {
+                    font: asset_server.load("fonts/FiraSansExtraCondensed-Black.ttf"), // Police de caractères
+                    font_size: 30.0, // Taille du texte
+                    color: Color::WHITE, // Couleur du texte
+                },
+            ),
+            style: Style {
+                position_type: PositionType::Absolute,
+                margin: UiRect {
+                    top: Val::Px(10.0), // Position en haut
+                    left: Val::Auto,     // Ceci permet de pousser vers la droite
+                    right: Val::Px(10.0), // Alignement à droite
+                    bottom: Val::Auto,
+                },
+                ..default()
+            },
+            ..default()
+        },
+        FpsText, // Composant pour identifier ce texte
+    ));
 }

@@ -21,7 +21,8 @@ pub enum ServerMessage {
     PlayerJoin((ClientId, Color)),
     PlayerLeave(ClientId),
     Map(usize),
-    PosBalise((usize, usize))
+    PosBalise((usize, usize)),
+    GameOver(ClientId)
 }
 
 pub fn send_board()->Vec<Vec<char>>{

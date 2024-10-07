@@ -29,3 +29,10 @@ pub struct InitialImageTag;
 
 #[derive(Component)]
 pub struct TextTag; // Tag pour le texte
+
+// #[derive(Component)]
+// pub struct FpsDisplay;
+
+// Composant pour identifier le texte des FPS
+#[derive(Component)]
+pub struct FpsText;
