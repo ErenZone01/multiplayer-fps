@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct PlayerAttributes {
     pub position: [f32; 3],
-    pub color : Color
+    pub color : Color,
 }
 
 #[derive(Serialize, Deserialize, Debug)]

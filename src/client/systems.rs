@@ -7,34 +7,45 @@ use std::{
 
 use crate::{
     components::{
-        Beacon, ButtonTag, FpsText, InitialImageTag, MiniMap, MiniMapCell, MiniPlayer, MyPlayer, PlayerEntity, TextTag
+        Beacon, ButtonTag, FpsText, InitialImageTag, MiniMap, MiniMapCell, MiniPlayer, MyPlayer,
+        PlayerEntity, TextTag,
     },
     events::{LobbySyncEvent, PlayerDespawnEvent, PlayerSpawnEvent},
-    resources::{
-        AppState, Board, ButtonClicked, ColorOtherPlayer, ConnectionInfo, PositionBalise
-    },
+    resources::{AppState, Board, ButtonClicked, ColorOtherPlayer, ConnectionInfo, PositionBalise},
     MyClientId,
 };
 use bevy::{
-    asset::{AssetServer, Assets}, core_pipeline::core_3d::Camera3dBundle, diagnostic::FrameTimeDiagnosticsPlugin, ecs::{
+    asset::{AssetServer, Assets},
+    core_pipeline::core_3d::Camera3dBundle,
+    diagnostic::FrameTimeDiagnosticsPlugin,
+    ecs::{
         event::{EventReader, EventWriter},
         system::{Commands, Query, Res, ResMut},
-    }, input::{
+    },
+    input::{
         keyboard::{KeyCode, KeyboardInput},
         mouse::MouseMotion,
-    }, log::{error, info, warn}, math::{
+    },
+    log::{error, info, warn},
+    math::{
         primitives::{Cuboid, Plane3d, Sphere},
         Vec3,
-    }, pbr::{MaterialMeshBundle, StandardMaterial}, prelude::{
-        default, BuildChildren, ButtonBundle, Camera, Camera2dBundle, Changed, Entity,
-        ImageBundle, NextState, NodeBundle, ParamSet, TextBundle, With,
-    }, render::{
+    },
+    pbr::{MaterialMeshBundle, StandardMaterial},
+    prelude::{
+        default, BuildChildren, ButtonBundle, Camera, Camera2dBundle, Changed, Entity, ImageBundle,
+        NextState, NodeBundle, ParamSet, TextBundle, With,
+    },
+    render::{
         color::{self, Color},
         mesh::Mesh,
-    }, text::{Text, TextStyle}, transform::components::Transform, ui::{
+    },
+    text::{Text, TextStyle},
+    transform::components::Transform,
+    ui::{
         AlignItems, BackgroundColor, Interaction, JustifyContent, PositionType, Style, UiImage,
         UiRect, Val,
-    }
+    },
 };
 use multiplayer_demo::{send_board, PlayerAttributes};
 use renet::{
@@ -57,7 +68,10 @@ pub fn send_message_system(mut client: ResMut<RenetClient>, query: Query<(&MyPla
     client.send_message(DefaultChannel::Unreliable, message);
 }
 
-pub fn send_message_game_over(mut client: ResMut<RenetClient>, query: Query<(&MyPlayer, &Transform)>) {
+pub fn send_message_game_over(
+    mut client: ResMut<RenetClient>,
+    query: Query<(&MyPlayer, &Transform)>,
+) {
     let _ = query;
     if client.is_disconnected() {
         panic!("Client is disconnected from the server");
@@ -112,7 +126,7 @@ pub fn receive_message_system(
                     // Insérer la position de la balise dans les ressources
                     commands.insert_resource(PositionBalise { pos: pos_balise });
                 }
-                multiplayer_demo::ServerMessage::GameOver(_)=>{
+                multiplayer_demo::ServerMessage::GameOver(_) => {
                     next_state.set(AppState::Lose);
                 }
                 _ => {
@@ -216,11 +230,13 @@ pub fn setup_system(
     position_balise: Res<PositionBalise>,
     client: ResMut<RenetClient>,
     mut next_state: ResMut<NextState<AppState>>,
+    asset_server: Res<AssetServer>,
 ) {
     if client.is_disconnected() {
         panic!("disconnected : Client is not connected to the server");
     }
 
+    // Création de la caméra et du joueur
     // Création de la caméra et du joueur
     commands
         .spawn((
@@ -231,6 +247,7 @@ pub fn setup_system(
             MyPlayer,
         ))
         .with_children(|command| {
+            // Joueur représenté par une sphère
             command.spawn(MaterialMeshBundle {
                 material: materials.add(StandardMaterial {
                     base_color: Color::rgb(0.0, 1.0, 0.0),
@@ -238,6 +255,19 @@ pub fn setup_system(
                 }),
                 mesh: meshes.add(Sphere::new(0.2)),
                 transform: Transform::from_xyz(3.0, 1.0, 0.0),
+                ..default()
+            });
+
+            // Création du fusil devant la caméra pour un FPS
+            command.spawn(MaterialMeshBundle {
+                material: materials.add(StandardMaterial {
+                    base_color: Color::rgb(0.0, 0.0, 0.0), // Couleur grise pour le fusil
+                    ..default()
+                }),
+                // Le fusil est un cuboid allongé
+                mesh: meshes.add(Cuboid::new(0.2, 0.2, 0.6)),
+                // Le fusil est positionné légèrement devant et en bas de la caméra, typique des jeux FPS
+                transform: Transform::from_xyz(0.5, -0.5, -1.0), // Position devant la caméra
                 ..default()
             });
         });
@@ -253,7 +283,10 @@ pub fn setup_system(
         ..default()
     });
 
-    // Génération des murs
+    // Charger la texture de brique
+    let brick_texture_handle = asset_server.load("textures/brick_textures.png");
+
+    // Génération des murs avec Cuboid
     for (z, line) in board.data.iter().enumerate() {
         for (x, c) in line.iter().enumerate() {
             if *c == '0' {
@@ -261,10 +294,10 @@ pub fn setup_system(
             } else {
                 commands.spawn(MaterialMeshBundle {
                     material: materials.add(StandardMaterial {
-                        base_color: Color::rgb(0.0, 0.0, 1.0),
+                        base_color_texture: Some(brick_texture_handle.clone()), // Appliquer la texture de brique
                         ..default()
                     }),
-                    mesh: meshes.add(Cuboid::new(1.0, 3.0, 1.0)),
+                    mesh: meshes.add(Cuboid::new(1.0, 3.0, 1.0)), // Conserver l'utilisation de Cuboid
                     transform: Transform::from_xyz(-(x as f32) + 7.0, 0.0, z as f32 - 7.0),
                     ..default()
                 });
@@ -364,7 +397,6 @@ pub fn setup_game_over_lose(mut commands: Commands) {
         });
 }
 
-
 pub fn spawn_map_2d(
     mut commands: Commands,
     board: Res<Board>,
@@ -448,7 +480,7 @@ pub fn handle_player_spawn_event_system(
 ) {
     for event in despawn_events.read() {
         info!(
-            "Handling player spawn event: {:?} color : {:?}",
+            "Handling player despawn event: {:?} color : {:?}",
             event.0, color
         );
     }
@@ -464,14 +496,29 @@ pub fn handle_player_spawn_event_system(
         commands.spawn((
             MaterialMeshBundle {
                 material: materials.add(StandardMaterial {
-                    base_color: color.color, // Applique la couleur générée
+                    base_color: color.color, // Applique la couleur générée pour le joueur
                     ..default()
                 }),
-                mesh: meshes.add(Cuboid::new(0.2, 0.2, 0.2)), // Taille du cube du joueur
+                mesh: meshes.add(Cuboid::new(0.5, 0.5, 0.5)), // Cube pour représenter le joueur
+                transform: Transform::from_xyz(0.0, 1.0, 0.0), // Position initiale du joueur
                 ..default()
             },
             PlayerEntity(client_id),
-        ));
+        ))
+        .with_children(|player| {
+            // Ajouter le fusil en tant qu'enfant du cube joueur
+            player.spawn(MaterialMeshBundle {
+                material: materials.add(StandardMaterial {
+                    base_color: Color::rgb(0.0, 0.0, 0.0), // Fusil de couleur noire
+                    ..default()
+                }),
+                // Le fusil est un cuboid allongé
+                mesh: meshes.add(Cuboid::new(0.2, 0.2, 0.6)),
+                // Position légèrement devant le cube du joueur
+                transform: Transform::from_xyz(0.5, 0.0, 0.5), // Position relative au joueur
+                ..default()
+            });
+        });
     }
 }
 
@@ -557,9 +604,9 @@ fn check_collision(map: Vec<Vec<char>>, position: Vec3) -> bool {
     let x = (-position.x + 7.0).round() as usize;
     let z = (position.z + 7.0).round() as usize;
 
-    if x >= map[0].len() || z >= map.len() {
-        return true; // Out of bounds, consider it a collision
-    }
+    // if x >= map[0].len() || z >= map.len() {
+    //     return true; // Out of bounds, consider it a collision
+    // }
 
     //println!("Checking collision at x = {}, z = {}", x, z);
     map[z][x] == '1'
@@ -760,14 +807,15 @@ pub fn connect_to_server(
     next_state.set(AppState::WaitingForMap);
 }
 
-
-
 use bevy::diagnostic::DiagnosticsStore;
 
 // Système de mise à jour des FPS
 pub fn update_fps(diagnostics: Res<DiagnosticsStore>, mut query: Query<&mut Text, With<FpsText>>) {
     // Récupère les FPS via DiagnosticsStore
-    if let Some(fps) = diagnostics.get(&FrameTimeDiagnosticsPlugin::FPS).and_then(|fps| fps.average()) {
+    if let Some(fps) = diagnostics
+        .get(&FrameTimeDiagnosticsPlugin::FPS)
+        .and_then(|fps| fps.average())
+    {
         for mut text in query.iter_mut() {
             text.sections[0].value = format!("FPS: {:.0}", fps); // Met à jour le texte avec les FPS
         }
@@ -778,16 +826,14 @@ pub fn update_fps(diagnostics: Res<DiagnosticsStore>, mut query: Query<&mut Text
 pub fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
     // Ici, pas besoin d'ajouter de caméra, ta caméra 3D existante sera utilisée pour tout.
 
-     // Ajoute une caméra 2D pour le texte, avec un ordre explicite pour éviter les ambiguïtés
-     commands.spawn((
-        Camera2dBundle {
-            camera: Camera {
-                order: 2, // Priorité explicite de la caméra
-                ..default()
-            },
+    // Ajoute une caméra 2D pour le texte, avec un ordre explicite pour éviter les ambiguïtés
+    commands.spawn((Camera2dBundle {
+        camera: Camera {
+            order: 2, // Priorité explicite de la caméra
             ..default()
         },
-    ));
+        ..default()
+    },));
 
     // Création du texte des FPS (cela sera rendu dans le coin supérieur droit)
     commands.spawn((
@@ -796,15 +842,15 @@ pub fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
                 "FPS:".to_string(), // Texte initial
                 TextStyle {
                     font: asset_server.load("fonts/FiraSansExtraCondensed-Black.ttf"), // Police de caractères
-                    font_size: 30.0, // Taille du texte
+                    font_size: 30.0,     // Taille du texte
                     color: Color::WHITE, // Couleur du texte
                 },
             ),
             style: Style {
                 position_type: PositionType::Absolute,
                 margin: UiRect {
-                    top: Val::Px(10.0), // Position en haut
-                    left: Val::Auto,     // Ceci permet de pousser vers la droite
+                    top: Val::Px(10.0),   // Position en haut
+                    left: Val::Auto,      // Ceci permet de pousser vers la droite
                     right: Val::Px(10.0), // Alignement à droite
                     bottom: Val::Auto,
                 },
