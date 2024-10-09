@@ -8,7 +8,7 @@ use std::{
 use crate::{
     components::{
         Beacon, ButtonTag, FpsText, InitialImageTag, MiniMap, MiniMapCell, MiniPlayer, MyPlayer,
-        PlayerEntity, TextTag,
+        PlayerEntity, Projectile, TextTag,
     },
     events::{LobbySyncEvent, PlayerDespawnEvent, PlayerSpawnEvent},
     resources::{AppState, Board, ButtonClicked, ColorOtherPlayer, ConnectionInfo, PositionBalise},
@@ -34,13 +34,14 @@ use bevy::{
     pbr::{MaterialMeshBundle, StandardMaterial},
     prelude::{
         default, BuildChildren, ButtonBundle, Camera, Camera2dBundle, Changed, Entity, ImageBundle,
-        NextState, NodeBundle, ParamSet, TextBundle, With,
+        NextState, NodeBundle, ParamSet, TextBundle, With, Without,
     },
     render::{
         color::{self, Color},
         mesh::Mesh,
     },
     text::{Text, TextStyle},
+    time::Time,
     transform::components::Transform,
     ui::{
         AlignItems, BackgroundColor, Interaction, JustifyContent, PositionType, Style, UiImage,
@@ -236,7 +237,6 @@ pub fn setup_system(
         panic!("disconnected : Client is not connected to the server");
     }
 
-    // Création de la caméra et du joueur
     // Création de la caméra et du joueur
     commands
         .spawn((
@@ -493,32 +493,19 @@ pub fn handle_player_spawn_event_system(
         let client_id = event.0;
 
         // Créer le joueur avec la couleur générée
-        commands.spawn((
-            MaterialMeshBundle {
-                material: materials.add(StandardMaterial {
-                    base_color: color.color, // Applique la couleur générée pour le joueur
+        commands
+            .spawn((
+                MaterialMeshBundle {
+                    material: materials.add(StandardMaterial {
+                        base_color: color.color, // Applique la couleur générée pour le joueur
+                        ..default()
+                    }),
+                    mesh: meshes.add(Cuboid::new(0.5, 0.5, 0.5)), // Cube pour représenter le joueur
+                    transform: Transform::from_xyz(0.0, 1.0, 0.0), // Position initiale du joueur
                     ..default()
-                }),
-                mesh: meshes.add(Cuboid::new(0.5, 0.5, 0.5)), // Cube pour représenter le joueur
-                transform: Transform::from_xyz(0.0, 1.0, 0.0), // Position initiale du joueur
-                ..default()
-            },
-            PlayerEntity(client_id),
-        ))
-        .with_children(|player| {
-            // Ajouter le fusil en tant qu'enfant du cube joueur
-            player.spawn(MaterialMeshBundle {
-                material: materials.add(StandardMaterial {
-                    base_color: Color::rgb(0.0, 0.0, 0.0), // Fusil de couleur noire
-                    ..default()
-                }),
-                // Le fusil est un cuboid allongé
-                mesh: meshes.add(Cuboid::new(0.2, 0.2, 0.6)),
-                // Position légèrement devant le cube du joueur
-                transform: Transform::from_xyz(0.5, 0.0, 0.5), // Position relative au joueur
-                ..default()
-            });
-        });
+                },
+                PlayerEntity(client_id),
+            ));
     }
 }
 
@@ -860,4 +847,103 @@ pub fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
         },
         FpsText, // Composant pour identifier ce texte
     ));
+}
+
+use bevy::input::ButtonState;
+use bevy::render::mesh::shape;
+
+pub fn shoot_system(
+    mut commands: Commands,
+    mut keyboard_input_events: EventReader<KeyboardInput>,
+    query: Query<(Entity, &Transform), With<Camera>>, // Récupérer à la fois l'entité et sa transformation
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    for event in keyboard_input_events.read() {
+        if event.state == ButtonState::Pressed && event.key_code == KeyCode::Space {
+            let (camera_entity, camera_transform) = query.single(); // Récupérer l'entité de la caméra
+
+            let forward = camera_transform.forward().into();
+            let position = camera_transform.translation + forward * 0.1;
+
+            commands.spawn((
+                MaterialMeshBundle {
+                    material: materials.add(StandardMaterial {
+                        base_color: Color::rgb(1.0, 0.0, 0.0),
+                        ..default()
+                    }),
+                    mesh: meshes.add(Mesh::from(shape::UVSphere {
+                        radius: 0.1,
+                        sectors: 32,
+                        stacks: 16,
+                    })),
+                    transform: Transform::from_translation(position),
+                    ..default()
+                },
+                Projectile { direction: forward, shooter: camera_entity }, // Associer l'entité du tireur
+            ));
+        }
+    }
+}
+
+
+pub fn update_projectile_system(
+    time: Res<Time>,
+    mut query: Query<(&mut Transform, &Projectile)>,
+) {
+    for (mut transform, projectile) in query.iter_mut() {
+        let speed = 8.0; // Vitesse du projectile
+        // Utiliser la direction du projectile pour le déplacement
+        transform.translation += projectile.direction * speed * time.delta_seconds();
+    }
+}
+
+
+pub fn handle_collision_system(
+    mut commands: Commands,
+    query: Query<(Entity, &Transform, &Projectile)>,
+    board: Res<Board>,
+) {
+    for (entity, transform, _) in query.iter() {
+        let x = (-transform.translation.x + 7.0).round() as usize;
+        let z = (transform.translation.z + 7.0).round() as usize;
+
+        if x >= board.data[0].len() || z >= board.data.len() {
+            // Le projectile est sorti des limites du plateau, le supprimer
+            commands.entity(entity).despawn();
+        } else if board.data[z][x] == '1' {
+            // Le projectile a touché un mur, le supprimer
+            commands.entity(entity).despawn();
+        }
+    }
+}
+pub fn check_projectile_collision_system(
+    mut commands: Commands,
+    query_projectiles: Query<(Entity, &Transform, &Projectile)>,
+    query_players: Query<(Entity, &Transform, &PlayerEntity)>, 
+    mut next_state: ResMut<NextState<AppState>>,
+) {
+    for (projectile_entity, projectile_transform, projectile) in query_projectiles.iter() {
+        for (player_entity, player_transform, player) in query_players.iter() { 
+            // Ne pas vérifier la collision si le joueur a tiré le projectile
+            if projectile.shooter != player_entity { // Comparez avec l'ID du joueur
+                let distance = player_transform.translation.distance(projectile_transform.translation);
+                println!("La distance entre le projectile et le joueur est : {}", distance);
+
+                if distance < 1.0 {
+                    // Le projectile a touché un joueur
+                    // println!("Un joueur a été touché par un projectile !");
+                    
+                    // Supprimez le projectile de la scène
+                    commands.entity(projectile_entity).despawn();
+                    commands.entity(player_entity).despawn();
+                     
+                    // Changez l'état du jeu en GameOver
+                   // next_state.set(AppState::GameOver);
+                    println!("Game Over !");
+                    //return; // Sortir de la boucle après avoir terminé le jeu
+                }
+            }
+        }
+    }
 }

@@ -10,11 +10,6 @@ use bevy::{
 };
 use bevy_renet::{transport::NetcodeClientPlugin, RenetClientPlugin};
 
-use resources::{AppState, ButtonClicked, ColorOtherPlayer};
-use systems::{
-    check_victory_system, connect_to_server, get_connection_info, handle_button_click, send_message_game_over, setup, setup_game_over, setup_game_over_lose, setup_ui, update_fps
-};
-//use systems::check_connection;
 use crate::{
     resources::MyClientId,
     systems::{
@@ -22,6 +17,10 @@ use crate::{
         mini_map_sync_event_system, receive_message_system, rotation_player, send_message_system,
         setup_system, spawn_map_2d, update_player_movement_system,
     },
+};
+use resources::{AppState, ButtonClicked, ColorOtherPlayer};
+use systems::{
+    check_projectile_collision_system, check_victory_system, connect_to_server, get_connection_info, handle_button_click, handle_collision_system, send_message_game_over, setup, setup_game_over, setup_game_over_lose, setup_ui, shoot_system, update_fps, update_projectile_system
 };
 
 mod components;
@@ -46,15 +45,13 @@ fn main() {
     app.add_plugins(DefaultPlugins);
     app.add_plugins(FrameTimeDiagnosticsPlugin);
 
-    // app.add_plugins(bevy::diagnostic::FrameTimeDiagnosticsPlugin);
-
     app.insert_resource(ColorOtherPlayer {
         color: color::Color::WHITE,
     });
     app.insert_resource(ButtonClicked::default());
-    // // game systems
-    app.add_systems(OnEnter(AppState::ConnectToServer), connect_to_server);
 
+    // game systems
+    app.add_systems(OnEnter(AppState::ConnectToServer), connect_to_server);
     app.add_systems(
         Update,
         receive_message_system.run_if(
@@ -64,21 +61,14 @@ fn main() {
             ),
         ),
     );
-
-
     app.add_systems(Startup, setup); // Configurez le texte FPS
     app.add_systems(Update, update_fps.run_if(in_state(AppState::Playing))); // Ajoutez le système d'affichage des FPS
-
-    // Appeler setup_ui pour afficher l'interface de démarrage
-    app.add_systems(OnEnter(AppState::Menu), setup_ui);
+    app.add_systems(OnEnter(AppState::Menu), setup_ui); // Appeler setup_ui pour afficher l'interface de démarrage
     app.add_systems(Update, handle_button_click.run_if(in_state(AppState::Menu)));
     app.add_systems(
         OnEnter(AppState::Setup),
         (setup_system, spawn_map_2d).chain(),
     );
-   // app.add_systems(Update, update_fps_display.run_if(in_state(AppState::Playing)));
-   
-
     app.add_systems(
         Update,
         (
@@ -88,13 +78,16 @@ fn main() {
             (rotation_player, update_player_movement_system),
             mini_map_sync_event_system,
             check_victory_system,
+            shoot_system,
+            handle_collision_system,
+            update_projectile_system,
+            check_projectile_collision_system,
         )
             .chain()
             .run_if(in_state(AppState::Playing)),
     );
     app.add_systems(OnEnter(AppState::GameOver), setup_game_over);
     app.add_systems(OnEnter(AppState::Lose), setup_game_over_lose);
-
     app.add_systems(OnEnter(AppState::GameOver), send_message_game_over);
 
     // game events

@@ -1,4 +1,4 @@
-use bevy::ecs::component::Component;
+use bevy::{ecs::component::Component, math::Vec3, prelude::Entity};
 use renet::ClientId;
 
 #[derive(Component)]
@@ -36,3 +36,11 @@ pub struct TextTag; // Tag pour le texte
 // Composant pour identifier le texte des FPS
 #[derive(Component)]
 pub struct FpsText;
+
+
+
+#[derive(Component)]
+pub struct Projectile {
+    pub direction: Vec3,
+    pub shooter: Entity, // Ajoutez cet identifiant de joueur
+}
