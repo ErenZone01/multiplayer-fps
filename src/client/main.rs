@@ -99,7 +99,6 @@ fn main() {
 
     // game events
     app.add_event::<events::PlayerSpawnEvent>();
-    app.add_event::<events::PlayerDespawnEvent>();
     app.add_event::<events::PlayerMoveEvent>();
     app.add_event::<events::LobbySyncEvent>();
 
