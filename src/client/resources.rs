@@ -71,3 +71,7 @@ impl ConnectionInfo {
 #[allow(dead_code)]
 #[derive(Resource)]
 pub struct PlayerEntities(pub HashMap<ClientId, Entity>);
+
+
+#[derive(Resource)]
+pub struct  IsWin(pub bool);

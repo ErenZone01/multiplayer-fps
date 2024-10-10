@@ -11,7 +11,7 @@ use rand::{seq::IteratorRandom, Rng};
 use renet::{DefaultChannel, RenetServer, ServerEvent};
 
 use crate::{
-    resources::{IsTakingBalise, IsTakingMap, PlayerLobby},
+    resources::{IsDeathOnce, IsTakingBalise, IsTakingMap, PlayerLobby},
     SERVER_ADDR,
 };
 
@@ -19,7 +19,7 @@ pub fn setup_system() {
     info!("Server started on {}", SERVER_ADDR);
 }
 
-pub fn send_message_system(mut server: ResMut<RenetServer>, player_lobby: Res<PlayerLobby>) {
+pub fn send_message_system(mut server: ResMut<RenetServer>, player_lobby: Res<PlayerLobby>, is_death_once : ResMut<IsDeathOnce>) {
     let chanel = DefaultChannel::Unreliable;
     let lobby: std::collections::HashMap<renet::ClientId, PlayerAttributes> =
         player_lobby.0.clone();
@@ -27,11 +27,19 @@ pub fn send_message_system(mut server: ResMut<RenetServer>, player_lobby: Res<Pl
     let message = bincode::serialize(&event).unwrap();
     //print_lobby(&player_lobby);
     server.broadcast_message(chanel, message);
+    if player_lobby.0.len() == 1 && is_death_once.death {
+        for (key, _) in player_lobby.0.clone(){
+            let gameover = multiplayer_demo::ServerMessage::GameOver(key);
+            let msg = bincode::serialize(&gameover).unwrap();
+            server.send_message(key, DefaultChannel::ReliableOrdered, msg );
+        }
+    }
 }
 
 pub fn receive_message_system(
     mut server: ResMut<RenetServer>,
     mut player_lobby: ResMut<PlayerLobby>,
+    mut is_death_once: ResMut<IsDeathOnce>,
 ) {
     for client_id in server.clients_id() {
         //mettre a jours la position des joueurs
@@ -60,6 +68,8 @@ pub fn receive_message_system(
                                 DefaultChannel::ReliableOrdered,
                                 broadcast_message,
                             );
+                            player_lobby.0.remove(&dead_client_id);
+                            is_death_once.death = true;
                             // if player_lobby.0.remove(&dead_client_id).is_some() {
                             //     // Le joueur a été retiré du lobby
                             //     let message = ServerMessage::PlayerLeave(dead_client_id);

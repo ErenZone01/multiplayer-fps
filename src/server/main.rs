@@ -9,7 +9,7 @@ use renet::{
     ConnectionConfig, RenetServer,
 };
 use systems::{handle_events_system, receive_message_system, send_message_system, setup_system};
-use resources::{ IsTakingBalise, IsTakingMap, PlayerLobby};
+use resources::{ IsDeathOnce, IsTakingBalise, IsTakingMap, PlayerLobby};
 
 mod systems;
 mod resources;
@@ -44,6 +44,7 @@ fn main() {
     app.insert_resource(transport);
     app.insert_resource(IsTakingMap{map : None});
     app.insert_resource(IsTakingBalise{balise : None});
+    app.insert_resource(IsDeathOnce { death : false });
 
     // game systems
     app.insert_resource(PlayerLobby(HashMap::default()));
@@ -52,5 +53,6 @@ fn main() {
     app.add_systems(Update, receive_message_system);
     app.add_systems(Startup, setup_system);
     app.add_systems(Update, send_message_system);
+
     app.run();
 }

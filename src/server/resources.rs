@@ -12,3 +12,5 @@ pub  struct  IsTakingBalise{ pub balise : Option<(usize, usize)>}
 #[derive(Resource)]
 pub  struct  IsTakingMap{ pub map : Option<usize>}
 
+#[derive(Resource)]
+pub  struct  IsDeathOnce{ pub death : bool}
