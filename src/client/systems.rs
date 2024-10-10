@@ -74,17 +74,17 @@ pub fn send_message_system(mut client: ResMut<RenetClient>, query: Query<(&MyPla
     client.send_message(DefaultChannel::Unreliable, message);
 }
 
-pub fn send_message_game_over(
-    mut client: ResMut<RenetClient>,
-    query: Query<(&MyPlayer, &Transform)>,
-) {
-    let _ = query;
-    if client.is_disconnected() {
-        panic!("Client is disconnected from the server");
-    }
-    let message = bincode::serialize("Gameover").unwrap();
-    client.send_message(DefaultChannel::ReliableOrdered, message);
-}
+// pub fn send_message_game_over(
+//     mut client: ResMut<RenetClient>,
+//     query: Query<(&MyPlayer, &Transform)>,
+// ) {
+//     let _ = query;
+//     if client.is_disconnected() {
+//         panic!("Client is disconnected from the server");
+//     }
+//     let message = bincode::serialize("Gameover").unwrap();
+//     client.send_message(DefaultChannel::ReliableOrdered, message);
+// }
 
 pub fn receive_message_system(
     mut commands: Commands,
@@ -108,8 +108,7 @@ pub fn receive_message_system(
                     commands.insert_resource(ColorOtherPlayer { color: colors });
                 }
                 multiplayer_demo::ServerMessage::PlayerLeave(client_id) => {
-                    info!("Client disconnected: {}", client_id);
-                    despawn_events.send(PlayerDespawnEvent(client_id));
+                    info!("leave : Client disconnected: {}", client_id);
                 }
                 multiplayer_demo::ServerMessage::Map(map_id) => {
                     // Logique pour charger la carte
@@ -136,14 +135,15 @@ pub fn receive_message_system(
                     // Insérer la position de la balise dans les ressources
                     commands.insert_resource(PositionBalise { pos: pos_balise });
                 }
-                multiplayer_demo::ServerMessage::GameOver(_) => {
-                    next_state.set(AppState::Lose);
-                }
+                // multiplayer_demo::ServerMessage::GameOver(_) => {
+                //     next_state.set(AppState::Lose);
+                // }
                 multiplayer_demo::ServerMessage::PlayerDeath(client_id) => {
                     if client_id == my_client_id.0 {
+                        info!("c'est moi qui suis mort");
                         death_event.0 = true;
                     } else {
-                        despawn_events.send(PlayerDespawnEvent(client_id));
+                        info!("j'ai recu la mort du joueur : {:?} ", client_id);
                         despawn_player(
                             &mut commands,
                             &mut player_entities,
@@ -189,19 +189,27 @@ fn despawn_player(
     client_id: ClientId,
     entity_query: &Query<Entity>,
 ) {
-    if let Some(entity) = player_entities.0.remove(&client_id) {
-        // Vérifier si l'entité existe toujours dans le monde
-        if entity_query.get(entity).is_ok() {
-            commands.entity(entity).despawn_recursive();
-            info!("Despawned player entity for client: {}", client_id);
-        } else {
-            info!(
-                "Entity for client {} no longer exists, skipping despawn",
-                client_id
-            );
+    // if let Some(entity) = player_entities.0.remove(&client_id) {
+    //     // Vérifier si l'entité existe toujours dans le monde
+    //     if entity_query.get(entity).is_ok() {
+    //         commands.entity(entity).despawn_recursive();
+    //         info!("Despawned player entity for client: {}", client_id);
+    //     } else {
+    //         info!(
+    //             "Entity for client {} no longer exists, skipping despawn",
+    //             client_id
+    //         );
+    //     }
+    // } else {
+    //     info!("No entity found to despawn for client: {}", client_id);
+    // }
+    if player_entities.0.contains_key(&client_id){
+        for (key, value) in player_entities.0.clone(){
+            if key == client_id{
+                info!("j'ai supprimer le client_id");
+                commands.entity(value).despawn_recursive();
+            }
         }
-    } else {
-        info!("No entity found to despawn for client: {}", client_id);
     }
 }
 
@@ -372,25 +380,25 @@ pub fn setup_system(
     info!("setup create");
 }
 
-pub fn check_victory_system(
-    query_players: Query<&Transform, With<MyPlayer>>,
-    query_beacon: Query<&Transform, With<Beacon>>,
-    mut next_state: ResMut<NextState<AppState>>,
-) {
-    let beacon_transform = query_beacon.single();
+// pub fn check_victory_system(
+//     query_players: Query<&Transform, With<MyPlayer>>,
+//     query_beacon: Query<&Transform, With<Beacon>>,
+//     mut next_state: ResMut<NextState<AppState>>,
+// ) {
+//     let beacon_transform = query_beacon.single();
 
-    for player_transform in query_players.iter() {
-        let distance = player_transform
-            .translation
-            .distance(beacon_transform.translation);
+//     for player_transform in query_players.iter() {
+//         let distance = player_transform
+//             .translation
+//             .distance(beacon_transform.translation);
 
-        if distance < 1.0 {
-            println!("Victoire ! Le joueur a trouvé la balise !");
-            next_state.set(AppState::GameOver)
-            // Ajoute ici la logique pour gérer la victoire (exemple : fin de la partie)
-        }
-    }
-}
+//         if distance < 1.0 {
+//             println!("Victoire ! Le joueur a trouvé la balise !");
+//             next_state.set(AppState::GameOver)
+//             // Ajoute ici la logique pour gérer la victoire (exemple : fin de la partie)
+//         }
+//     }
+// }
 pub fn setup_game_over(mut commands: Commands) {
     commands
         .spawn(NodeBundle {
@@ -519,27 +527,22 @@ pub fn handle_player_spawn_event_system(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut spawn_events: EventReader<PlayerSpawnEvent>,
-    mut despawn_events: EventReader<PlayerDespawnEvent>,
+    mut player_entities: ResMut<PlayerEntities>,
+    my_client_id: Res<MyClientId>,
     color: Res<ColorOtherPlayer>,
 ) {
-    for _ in despawn_events.read() {
-        // info!(
-        //     "Handling player despawn event: {:?} color : {:?}",
-        //     event.0, color
-        // );
-        //let client_id = event.0;
-       // commands.entity(event.0).despawn();
-    }
-
     for event in spawn_events.read() {
+        let client_id = event.0;
+        if client_id == my_client_id.0 || player_entities.0.contains_key(&client_id) {
+            continue;
+        }
         info!(
             "Handling player spawn event: {:?} color : {:?}",
             event.0, color
         );
-        let client_id = event.0;
 
         // Créer le joueur avec la couleur générée
-        commands.spawn((
+        let player = commands.spawn((
             MaterialMeshBundle {
                 material: materials.add(StandardMaterial {
                     base_color: color.color, // Applique la couleur générée pour le joueur
@@ -551,6 +554,13 @@ pub fn handle_player_spawn_event_system(
             },
             PlayerEntity(client_id),
         ));
+        if let Some(entity) = player_entities.0.get_mut(&client_id) {
+            info!("je sais pas ce qui ce passe");
+            *entity = player.id();
+        } else if !player_entities.0.contains_key(&client_id) {
+            info!("j'ai inserer un joueur");
+            player_entities.0.insert(client_id, player.id());
+        }
     }
 }
 
@@ -582,7 +592,10 @@ pub fn handle_lobby_sync_event_system(
         }
         // Si le joueur n'existe pas encore, le spawn
         if !found {
-            info!("Spawning player {}: {:?}", client_id, player_sync.position);
+            info!(
+                "Spawning player loby {}: {:?}",
+                client_id, player_sync.position
+            );
             spawn_events.send(PlayerSpawnEvent(*client_id));
         }
     }
@@ -815,7 +828,6 @@ pub fn connect_to_server(
 
     let client_id = rand::random::<u64>();
     commands.insert_resource(MyClientId(ClientId::from_raw(client_id)));
-    commands.insert_resource(PlayerEntities(HashMap::new()));
 
     let mut user_data = [0u8; 256];
     let username_bytes = connection_info.username.as_bytes();
@@ -969,10 +981,6 @@ pub fn check_projectile_collision_system(
                 let distance = player_transform
                     .translation
                     .distance(projectile_transform.translation);
-                println!(
-                    "La distance entre le projectile et le joueur est : {}",
-                    distance
-                );
 
                 if distance < 1.0 {
                     // Le projectile a touché un joueur
@@ -980,15 +988,14 @@ pub fn check_projectile_collision_system(
 
                     // Supprimez le projectile de la scène
                     commands.entity(projectile_entity).despawn();
-                   // commands.entity(player_entity).despawn();
+                    // commands.entity(player_entity).despawn();
                     // Envoyer un message au serveur pour informer de la mort du joueur
                     let message =
-                    bincode::serialize(&ServerMessage::PlayerDeath(player.0)).unwrap();
+                        bincode::serialize(&ServerMessage::PlayerDeath(player.0)).unwrap();
                     client.send_message(DefaultChannel::ReliableOrdered, message);
 
                     // Changez l'état du jeu en GameOver
-                    // next_state.set(AppState::GameOver);
-                    println!("Game Over !");
+                    println!("la balle a touché le joueur {} ", player.0);
                     //return; // Sortir de la boucle après avoir terminé le jeu
                 }
             }
@@ -1005,19 +1012,23 @@ pub fn handle_local_player_death(
     mut death_event: ResMut<PlayerDeathEvent>,
 ) {
     if death_event.0 {
-        if let Ok(player_entity) = player_query.get_single() {
-            commands.entity(player_entity).despawn_recursive();
+        // if let Ok(player_entity) = player_query.get_single() {
+        //     commands.entity(player_entity).despawn_recursive();
 
-            // Despawn all other players
-            for entity in other_player_query.iter() {
-                commands.entity(entity).despawn_recursive();
-            }
-            // Disconnect the client
-            client.disconnect();
-            // Reset the game state or show a game over screen
-            next_state.set(AppState::GameOver);
-        }
-        // Reset the death event
+        //     // Despawn all other players
+        //     for entity in other_player_query.iter() {
+        //         info!("j'ai supprimé l'entité : {:?} ", entity);
+        //         commands.entity(entity).despawn_recursive();
+        //     }
+        //     // // Disconnect the client
+        next_state.set(AppState::Lose);
+        //    // client.disconnect();
+        //     info!("client deconnecté ici");
+        //     // Reset the game state or show a game over screen
+        //     info!("client deconnecté");
+
+        // }
+        // // Reset the death event
         death_event.0 = false;
     }
 }

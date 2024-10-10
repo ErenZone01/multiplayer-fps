@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use bevy::{
     app::{App, Startup, Update},
     diagnostic::FrameTimeDiagnosticsPlugin,
@@ -18,9 +20,9 @@ use crate::{
         setup_system, spawn_map_2d, update_player_movement_system,
     },
 };
-use resources::{AppState, ButtonClicked, ColorOtherPlayer, PlayerDeathEvent};
+use resources::{AppState, ButtonClicked, ColorOtherPlayer, PlayerDeathEvent, PlayerEntities};
 use systems::{
-    check_projectile_collision_system, check_victory_system, connect_to_server, get_connection_info, handle_button_click, handle_collision_system, handle_local_player_death, send_message_game_over, setup, setup_game_over, setup_game_over_lose, setup_ui, shoot_system, update_fps, update_projectile_system
+    check_projectile_collision_system, connect_to_server, get_connection_info, handle_button_click, handle_collision_system, handle_local_player_death, setup, setup_game_over, setup_game_over_lose, setup_ui, shoot_system, update_fps, update_projectile_system
 };
 
 mod components;
@@ -50,6 +52,7 @@ fn main() {
     });
     app.insert_resource(ButtonClicked::default());
     app.insert_resource(PlayerDeathEvent(false));
+    app.insert_resource(PlayerEntities(HashMap::new()));
 
 
     // game systems
@@ -79,7 +82,7 @@ fn main() {
             handle_lobby_sync_event_system,
             (rotation_player, update_player_movement_system),
             mini_map_sync_event_system,
-            check_victory_system,
+            //check_victory_system,
             shoot_system,
             handle_collision_system,
             update_projectile_system,
@@ -91,7 +94,7 @@ fn main() {
     );
     app.add_systems(OnEnter(AppState::GameOver), setup_game_over);
     app.add_systems(OnEnter(AppState::Lose), setup_game_over_lose);
-    app.add_systems(OnEnter(AppState::GameOver), send_message_game_over);
+   // app.add_systems(OnEnter(AppState::GameOver), send_message_game_over);
 
     // game events
     app.add_event::<events::PlayerSpawnEvent>();

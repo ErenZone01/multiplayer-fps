@@ -40,12 +40,12 @@ pub fn receive_message_system(
             let player: PlayerAttributes = bincode::deserialize(&message).unwrap();
             player_lobby.0.insert(client_id, player);
         }
-        let message2 = server.receive_message(client_id, DefaultChannel::ReliableOrdered);
-        if let Some(_) = message2 {
-            // Envoi des messages
-            let msg = bincode::serialize(&ServerMessage::GameOver(client_id)).unwrap_or_default();
-            server.broadcast_message_except(client_id, DefaultChannel::ReliableOrdered, msg);
-        }
+        // let message2 = server.receive_message(client_id, DefaultChannel::ReliableOrdered);
+        // if let Some(_) = message2 {
+        //     // Envoi des messages
+        //     let msg = bincode::serialize(&ServerMessage::GameOver(client_id)).unwrap_or_default();
+        //     server.broadcast_message_except(client_id, DefaultChannel::ReliableOrdered, msg);
+        // }
         // Traitement des messages fiables (y compris la mort des joueurs)
         while let Some(message) = server.receive_message(client_id, DefaultChannel::ReliableOrdered)
         {
@@ -60,20 +60,20 @@ pub fn receive_message_system(
                                 DefaultChannel::ReliableOrdered,
                                 broadcast_message,
                             );
-                            if player_lobby.0.remove(&dead_client_id).is_some() {
-                                // Le joueur a été retiré du lobby
-                                let message = ServerMessage::PlayerLeave(dead_client_id);
-                                let broadcast_message = bincode::serialize(&message).unwrap();
-                                server.broadcast_message_except(
-                                    dead_client_id,
-                                    DefaultChannel::ReliableOrdered,
-                                    broadcast_message,
-                                );
-                                info!(
-                                    "*Player {} died and was removed from the game*",
-                                    dead_client_id
-                                );
-                            }
+                            // if player_lobby.0.remove(&dead_client_id).is_some() {
+                            //     // Le joueur a été retiré du lobby
+                            //     let message = ServerMessage::PlayerLeave(dead_client_id);
+                            //     let broadcast_message = bincode::serialize(&message).unwrap();
+                            //     server.broadcast_message_except(
+                            //         dead_client_id,
+                            //         DefaultChannel::ReliableOrdered,
+                            //         broadcast_message,
+                            //     );
+                            // }
+                            info!(
+                                "*Player {} died and was removed from the game*",
+                                dead_client_id
+                            );
                         }
                     }
                     // Ajoutez ici d'autres types de messages si nécessaire
