@@ -1,8 +1,8 @@
-use std::net::SocketAddr;
+use std::{collections::HashMap, net::SocketAddr};
 
 use bevy::{
     ecs::system::Resource,
-    prelude::{Color, States},
+    prelude::{Color, Entity, States},
 };
 use renet::ClientId;
 
@@ -56,6 +56,9 @@ pub struct ConnectionInfo {
     pub username: String,
 }
 
+#[derive(Resource)]
+pub struct PlayerDeathEvent(pub bool);
+
 impl ConnectionInfo {
     pub fn new(server_addr: SocketAddr, username: String) -> Self {
         Self {
@@ -64,3 +67,7 @@ impl ConnectionInfo {
         }
     }
 }
+
+#[allow(dead_code)]
+#[derive(Resource)]
+pub struct PlayerEntities(pub HashMap<ClientId, Entity>);

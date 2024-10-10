@@ -1,5 +1,6 @@
 use std::{
     // collections::HashMap,
+    collections::HashMap,
     io::{self, Write},
     net::UdpSocket,
     time::SystemTime,
@@ -11,7 +12,10 @@ use crate::{
         PlayerEntity, Projectile, TextTag,
     },
     events::{LobbySyncEvent, PlayerDespawnEvent, PlayerSpawnEvent},
-    resources::{AppState, Board, ButtonClicked, ColorOtherPlayer, ConnectionInfo, PositionBalise},
+    resources::{
+        AppState, Board, ButtonClicked, ColorOtherPlayer, ConnectionInfo, PlayerDeathEvent,
+        PlayerEntities, PositionBalise,
+    },
     MyClientId,
 };
 use bevy::{
@@ -26,7 +30,7 @@ use bevy::{
         keyboard::{KeyCode, KeyboardInput},
         mouse::MouseMotion,
     },
-    log::{error, info, warn},
+    log::{error, info},
     math::{
         primitives::{Cuboid, Plane3d, Sphere},
         Vec3,
@@ -48,7 +52,8 @@ use bevy::{
         UiRect, Val,
     },
 };
-use multiplayer_demo::{send_board, PlayerAttributes};
+use bevy::{input::ButtonState, prelude::DespawnRecursiveExt};
+use multiplayer_demo::{send_board, PlayerAttributes, ServerMessage};
 use renet::{
     transport::{ClientAuthentication, NetcodeClientTransport},
     ClientId, ConnectionConfig, DefaultChannel, RenetClient,
@@ -87,6 +92,10 @@ pub fn receive_message_system(
     mut spawn_events: EventWriter<PlayerSpawnEvent>,
     mut despawn_events: EventWriter<PlayerDespawnEvent>,
     mut lobby_sync_events: EventWriter<LobbySyncEvent>,
+    mut death_event: ResMut<PlayerDeathEvent>,
+    my_client_id: Res<MyClientId>,
+    entity_query: Query<Entity>,
+    mut player_entities: ResMut<PlayerEntities>,
     mut next_state: ResMut<NextState<AppState>>,
 ) {
     // Boucle pour traiter les messages fiables
@@ -130,9 +139,22 @@ pub fn receive_message_system(
                 multiplayer_demo::ServerMessage::GameOver(_) => {
                     next_state.set(AppState::Lose);
                 }
+                multiplayer_demo::ServerMessage::PlayerDeath(client_id) => {
+                    if client_id == my_client_id.0 {
+                        death_event.0 = true;
+                    } else {
+                        despawn_events.send(PlayerDespawnEvent(client_id));
+                        despawn_player(
+                            &mut commands,
+                            &mut player_entities,
+                            client_id,
+                            &entity_query,
+                        );
+                    }
+                }
                 _ => {
                     // Pour les messages non gérés
-                    warn!("Unhandled message: {:?}", server_message);
+                    info!("Unhandled message: {:?}", server_message);
                 }
             },
             Err(e) => {
@@ -150,7 +172,7 @@ pub fn receive_message_system(
                     lobby_sync_events.send(LobbySyncEvent(map));
                 }
                 _ => {
-                    warn!("Unhandled unreliable message: {:?}", server_message);
+                    info!("Unhandled unreliable message: {:?}", server_message);
                 }
             },
             Err(e) => {
@@ -158,6 +180,28 @@ pub fn receive_message_system(
                 error!("Failed to deserialize unreliable message: {:?}", e);
             }
         }
+    }
+}
+
+fn despawn_player(
+    commands: &mut Commands,
+    player_entities: &mut ResMut<PlayerEntities>,
+    client_id: ClientId,
+    entity_query: &Query<Entity>,
+) {
+    if let Some(entity) = player_entities.0.remove(&client_id) {
+        // Vérifier si l'entité existe toujours dans le monde
+        if entity_query.get(entity).is_ok() {
+            commands.entity(entity).despawn_recursive();
+            info!("Despawned player entity for client: {}", client_id);
+        } else {
+            info!(
+                "Entity for client {} no longer exists, skipping despawn",
+                client_id
+            );
+        }
+    } else {
+        info!("No entity found to despawn for client: {}", client_id);
     }
 }
 
@@ -258,18 +302,18 @@ pub fn setup_system(
                 ..default()
             });
 
-            // Création du fusil devant la caméra pour un FPS
-            command.spawn(MaterialMeshBundle {
-                material: materials.add(StandardMaterial {
-                    base_color: Color::rgb(0.0, 0.0, 0.0), // Couleur grise pour le fusil
-                    ..default()
-                }),
-                // Le fusil est un cuboid allongé
-                mesh: meshes.add(Cuboid::new(0.2, 0.2, 0.6)),
-                // Le fusil est positionné légèrement devant et en bas de la caméra, typique des jeux FPS
-                transform: Transform::from_xyz(0.5, -0.5, -1.0), // Position devant la caméra
-                ..default()
-            });
+            // // Création du fusil devant la caméra pour un FPS
+            // command.spawn(MaterialMeshBundle {
+            //     material: materials.add(StandardMaterial {
+            //         base_color: Color::rgb(0.0, 0.0, 0.0), // Couleur grise pour le fusil
+            //         ..default()
+            //     }),
+            //     // Le fusil est un cuboid allongé
+            //     mesh: meshes.add(Cuboid::new(0.2, 0.2, 0.6)),
+            //     // Le fusil est positionné légèrement devant et en bas de la caméra, typique des jeux FPS
+            //     transform: Transform::from_xyz(0.5, -0.5, -1.0), // Position devant la caméra
+            //     ..default()
+            // });
         });
 
     // Création du sol
@@ -478,11 +522,13 @@ pub fn handle_player_spawn_event_system(
     mut despawn_events: EventReader<PlayerDespawnEvent>,
     color: Res<ColorOtherPlayer>,
 ) {
-    for event in despawn_events.read() {
-        info!(
-            "Handling player despawn event: {:?} color : {:?}",
-            event.0, color
-        );
+    for _ in despawn_events.read() {
+        // info!(
+        //     "Handling player despawn event: {:?} color : {:?}",
+        //     event.0, color
+        // );
+        //let client_id = event.0;
+       // commands.entity(event.0).despawn();
     }
 
     for event in spawn_events.read() {
@@ -493,19 +539,18 @@ pub fn handle_player_spawn_event_system(
         let client_id = event.0;
 
         // Créer le joueur avec la couleur générée
-        commands
-            .spawn((
-                MaterialMeshBundle {
-                    material: materials.add(StandardMaterial {
-                        base_color: color.color, // Applique la couleur générée pour le joueur
-                        ..default()
-                    }),
-                    mesh: meshes.add(Cuboid::new(0.5, 0.5, 0.5)), // Cube pour représenter le joueur
-                    transform: Transform::from_xyz(0.0, 1.0, 0.0), // Position initiale du joueur
+        commands.spawn((
+            MaterialMeshBundle {
+                material: materials.add(StandardMaterial {
+                    base_color: color.color, // Applique la couleur générée pour le joueur
                     ..default()
-                },
-                PlayerEntity(client_id),
-            ));
+                }),
+                mesh: meshes.add(Cuboid::new(0.5, 0.5, 0.5)), // Cube pour représenter le joueur
+                transform: Transform::from_xyz(0.0, 1.0, 0.0), // Position initiale du joueur
+                ..default()
+            },
+            PlayerEntity(client_id),
+        ));
     }
 }
 
@@ -770,7 +815,7 @@ pub fn connect_to_server(
 
     let client_id = rand::random::<u64>();
     commands.insert_resource(MyClientId(ClientId::from_raw(client_id)));
-    //commands.insert_resource(PlayerEntities(HashMap::new()));
+    commands.insert_resource(PlayerEntities(HashMap::new()));
 
     let mut user_data = [0u8; 256];
     let username_bytes = connection_info.username.as_bytes();
@@ -849,9 +894,6 @@ pub fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
     ));
 }
 
-use bevy::input::ButtonState;
-use bevy::render::mesh::shape;
-
 pub fn shoot_system(
     mut commands: Commands,
     mut keyboard_input_events: EventReader<KeyboardInput>,
@@ -872,32 +914,26 @@ pub fn shoot_system(
                         base_color: Color::rgb(1.0, 0.0, 0.0),
                         ..default()
                     }),
-                    mesh: meshes.add(Mesh::from(shape::UVSphere {
-                        radius: 0.1,
-                        sectors: 32,
-                        stacks: 16,
-                    })),
+                    mesh: meshes.add(Sphere::new(0.1)),
                     transform: Transform::from_translation(position),
                     ..default()
                 },
-                Projectile { direction: forward, shooter: camera_entity }, // Associer l'entité du tireur
+                Projectile {
+                    direction: forward,
+                    shooter: camera_entity,
+                }, // Associer l'entité du tireur
             ));
         }
     }
 }
 
-
-pub fn update_projectile_system(
-    time: Res<Time>,
-    mut query: Query<(&mut Transform, &Projectile)>,
-) {
+pub fn update_projectile_system(time: Res<Time>, mut query: Query<(&mut Transform, &Projectile)>) {
     for (mut transform, projectile) in query.iter_mut() {
         let speed = 8.0; // Vitesse du projectile
-        // Utiliser la direction du projectile pour le déplacement
+                         // Utiliser la direction du projectile pour le déplacement
         transform.translation += projectile.direction * speed * time.delta_seconds();
     }
 }
-
 
 pub fn handle_collision_system(
     mut commands: Commands,
@@ -920,30 +956,68 @@ pub fn handle_collision_system(
 pub fn check_projectile_collision_system(
     mut commands: Commands,
     query_projectiles: Query<(Entity, &Transform, &Projectile)>,
-    query_players: Query<(Entity, &Transform, &PlayerEntity)>, 
-    mut next_state: ResMut<NextState<AppState>>,
+    query_players: Query<(Entity, &Transform, &PlayerEntity)>,
+    next_state: ResMut<NextState<AppState>>,
+    mut client: ResMut<RenetClient>,
 ) {
+    let _ = next_state;
     for (projectile_entity, projectile_transform, projectile) in query_projectiles.iter() {
-        for (player_entity, player_transform, player) in query_players.iter() { 
+        for (player_entity, player_transform, player) in query_players.iter() {
             // Ne pas vérifier la collision si le joueur a tiré le projectile
-            if projectile.shooter != player_entity { // Comparez avec l'ID du joueur
-                let distance = player_transform.translation.distance(projectile_transform.translation);
-                println!("La distance entre le projectile et le joueur est : {}", distance);
+            if projectile.shooter != player_entity {
+                // Comparez avec l'ID du joueur
+                let distance = player_transform
+                    .translation
+                    .distance(projectile_transform.translation);
+                println!(
+                    "La distance entre le projectile et le joueur est : {}",
+                    distance
+                );
 
                 if distance < 1.0 {
                     // Le projectile a touché un joueur
                     // println!("Un joueur a été touché par un projectile !");
-                    
+
                     // Supprimez le projectile de la scène
                     commands.entity(projectile_entity).despawn();
-                    commands.entity(player_entity).despawn();
-                     
+                   // commands.entity(player_entity).despawn();
+                    // Envoyer un message au serveur pour informer de la mort du joueur
+                    let message =
+                    bincode::serialize(&ServerMessage::PlayerDeath(player.0)).unwrap();
+                    client.send_message(DefaultChannel::ReliableOrdered, message);
+
                     // Changez l'état du jeu en GameOver
-                   // next_state.set(AppState::GameOver);
+                    // next_state.set(AppState::GameOver);
                     println!("Game Over !");
                     //return; // Sortir de la boucle après avoir terminé le jeu
                 }
             }
         }
+    }
+}
+
+pub fn handle_local_player_death(
+    mut commands: Commands,
+    player_query: Query<Entity, With<MyPlayer>>,
+    other_player_query: Query<Entity, (With<PlayerEntity>, Without<MyPlayer>)>,
+    mut client: ResMut<RenetClient>,
+    mut next_state: ResMut<NextState<AppState>>,
+    mut death_event: ResMut<PlayerDeathEvent>,
+) {
+    if death_event.0 {
+        if let Ok(player_entity) = player_query.get_single() {
+            commands.entity(player_entity).despawn_recursive();
+
+            // Despawn all other players
+            for entity in other_player_query.iter() {
+                commands.entity(entity).despawn_recursive();
+            }
+            // Disconnect the client
+            client.disconnect();
+            // Reset the game state or show a game over screen
+            next_state.set(AppState::GameOver);
+        }
+        // Reset the death event
+        death_event.0 = false;
     }
 }

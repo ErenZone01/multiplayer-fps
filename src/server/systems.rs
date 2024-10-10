@@ -46,6 +46,41 @@ pub fn receive_message_system(
             let msg = bincode::serialize(&ServerMessage::GameOver(client_id)).unwrap_or_default();
             server.broadcast_message_except(client_id, DefaultChannel::ReliableOrdered, msg);
         }
+        // Traitement des messages fiables (y compris la mort des joueurs)
+        while let Some(message) = server.receive_message(client_id, DefaultChannel::ReliableOrdered)
+        {
+            if let Ok(server_message) = bincode::deserialize::<ServerMessage>(&message) {
+                match server_message {
+                    ServerMessage::PlayerDeath(dead_client_id) => {
+                        if let Some(_) = player_lobby.0.get_mut(&dead_client_id) {
+                            // Informer tous les clients de la mort du joueur
+                            let death_message = ServerMessage::PlayerDeath(dead_client_id);
+                            let broadcast_message = bincode::serialize(&death_message).unwrap();
+                            server.broadcast_message(
+                                DefaultChannel::ReliableOrdered,
+                                broadcast_message,
+                            );
+                            if player_lobby.0.remove(&dead_client_id).is_some() {
+                                // Le joueur a été retiré du lobby
+                                let message = ServerMessage::PlayerLeave(dead_client_id);
+                                let broadcast_message = bincode::serialize(&message).unwrap();
+                                server.broadcast_message_except(
+                                    dead_client_id,
+                                    DefaultChannel::ReliableOrdered,
+                                    broadcast_message,
+                                );
+                                info!(
+                                    "*Player {} died and was removed from the game*",
+                                    dead_client_id
+                                );
+                            }
+                        }
+                    }
+                    // Ajoutez ici d'autres types de messages si nécessaire
+                    _ => {}
+                }
+            }
+        }
     }
 }
 

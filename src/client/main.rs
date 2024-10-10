@@ -18,9 +18,9 @@ use crate::{
         setup_system, spawn_map_2d, update_player_movement_system,
     },
 };
-use resources::{AppState, ButtonClicked, ColorOtherPlayer};
+use resources::{AppState, ButtonClicked, ColorOtherPlayer, PlayerDeathEvent};
 use systems::{
-    check_projectile_collision_system, check_victory_system, connect_to_server, get_connection_info, handle_button_click, handle_collision_system, send_message_game_over, setup, setup_game_over, setup_game_over_lose, setup_ui, shoot_system, update_fps, update_projectile_system
+    check_projectile_collision_system, check_victory_system, connect_to_server, get_connection_info, handle_button_click, handle_collision_system, handle_local_player_death, send_message_game_over, setup, setup_game_over, setup_game_over_lose, setup_ui, shoot_system, update_fps, update_projectile_system
 };
 
 mod components;
@@ -49,6 +49,8 @@ fn main() {
         color: color::Color::WHITE,
     });
     app.insert_resource(ButtonClicked::default());
+    app.insert_resource(PlayerDeathEvent(false));
+
 
     // game systems
     app.add_systems(OnEnter(AppState::ConnectToServer), connect_to_server);
@@ -82,6 +84,7 @@ fn main() {
             handle_collision_system,
             update_projectile_system,
             check_projectile_collision_system,
+            handle_local_player_death,
         )
             .chain()
             .run_if(in_state(AppState::Playing)),
