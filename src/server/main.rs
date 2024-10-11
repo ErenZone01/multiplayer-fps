@@ -9,7 +9,7 @@ use renet::{
     ConnectionConfig, RenetServer,
 };
 use systems::{handle_events_system, receive_message_system, send_message_system, setup_system};
-use resources::{ IsDeathOnce, IsTakingBalise, IsTakingMap, PlayerLobby};
+use resources::{ IsDeathOnce, IsTakingMap, PlayerLobby};
 
 mod systems;
 mod resources;
@@ -43,7 +43,6 @@ fn main() {
     let transport = NetcodeServerTransport::new(server_config, socket).unwrap();
     app.insert_resource(transport);
     app.insert_resource(IsTakingMap{map : None});
-    app.insert_resource(IsTakingBalise{balise : None});
     app.insert_resource(IsDeathOnce { death : false });
 
     // game systems

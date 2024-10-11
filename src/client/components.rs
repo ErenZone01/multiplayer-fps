@@ -16,9 +16,6 @@ pub struct MiniMapCell;
 #[derive(Component)]
 pub struct MiniPlayer;
 
-// Définition de la composante `Beacon`
-#[derive(Component)]
-pub struct Beacon;
 
 // Tags pour identifier les éléments spécifiques
 #[derive(Component)]

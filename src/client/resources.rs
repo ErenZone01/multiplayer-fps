@@ -19,10 +19,6 @@ pub struct Board {
     pub data: Vec<Vec<char>>, // ou tout autre type
 }
 
-#[derive(Resource)]
-pub struct PositionBalise {
-    pub pos: (usize, usize), // ou tout autre type
-}
 
 #[derive(Resource, Debug)]
 pub struct ColorOtherPlayer {

@@ -6,13 +6,13 @@ use std::{
 
 use crate::{
     components::{
-        Beacon, ButtonTag, FpsText, InitialImageTag, MiniMap, MiniMapCell, MiniPlayer, MyPlayer,
+         ButtonTag, FpsText, InitialImageTag, MiniMap, MiniMapCell, MiniPlayer, MyPlayer,
         PlayerEntity, Projectile, TextTag,
     },
     events::{LobbySyncEvent, PlayerSpawnEvent},
     resources::{
         AppState, Board, ButtonClicked, ColorOtherPlayer, ConnectionInfo, IsWin, PlayerDeathEvent,
-        PlayerEntities, PositionBalise,
+        PlayerEntities,
     },
     MyClientId,
 };
@@ -51,7 +51,7 @@ use bevy::{
     },
 };
 use bevy::{input::ButtonState, prelude::DespawnRecursiveExt};
-use multiplayer_demo::{send_board, PlayerAttributes, ServerMessage};
+use multiplayer_demo::{send_board, send_board_map2, send_board_map3, PlayerAttributes, ServerMessage};
 use renet::{
     transport::{ClientAuthentication, NetcodeClientTransport},
     ClientId, ConnectionConfig, DefaultChannel, RenetClient,
@@ -101,34 +101,23 @@ pub fn receive_message_system(
 
                     let board_data = match map_id {
                         0 => send_board(),
-                        1 => send_board(),
-                        2 => send_board(),
+                        1 => send_board_map2(),
+                        2 => send_board_map3(),
                         _ => send_board(), // Gestion par défaut si map_id non reconnu
                     };
 
                     // Insérer la map dans les ressources
                     commands.insert_resource(Board { data: board_data });
-                    //commands.insert_resource(ColorOtherPlayer{color : color_player});
                     // Passer à l'état Playing une fois que la map est reçue
                     next_state.set(AppState::Menu);
-                    info!("Map data has been inserted and state set to Playing.");
-                }
-                multiplayer_demo::ServerMessage::PosBalise(pos_balise) => {
-                    // Logique pour recevoir la position de la balise
-                    info!("Received balise position: {:?}", pos_balise);
-
-                    // Insérer la position de la balise dans les ressources
-                    commands.insert_resource(PositionBalise { pos: pos_balise });
                 }
                 multiplayer_demo::ServerMessage::GameOver(_) => {
                     next_state.set(AppState::GameOver);
                 }
                 multiplayer_demo::ServerMessage::PlayerDeath(client_id) => {
                     if client_id == my_client_id.0 {
-                        info!("c'est moi qui suis mort");
                         death_event.0 = true;
                     } else {
-                        info!("j'ai recu la mort du joueur : {:?} ", client_id);
                         despawn_player(&mut commands, &mut player_entities, client_id, &mut win);
                     }
                 }
@@ -172,7 +161,6 @@ fn despawn_player(
     if player_entities.0.contains_key(&client_id) {
         for (key, value) in player_entities.0.clone() {
             if key == client_id {
-                info!("j'ai supprimer le client_id");
                 commands.entity(value).despawn_recursive();
                 win.0 = true;
             }
@@ -247,7 +235,6 @@ pub fn setup_system(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     board: Res<Board>,
-    position_balise: Res<PositionBalise>,
     client: ResMut<RenetClient>,
     mut next_state: ResMut<NextState<AppState>>,
     asset_server: Res<AssetServer>,
@@ -260,7 +247,8 @@ pub fn setup_system(
     commands
         .spawn((
             Camera3dBundle {
-                transform: Transform::from_xyz(3.0, 1.0, 0.0).looking_at(Vec3::NEG_Z, Vec3::Y),
+                transform: Transform::from_xyz(3.0, 1.0, 0.0)
+                    .looking_at(Vec3::NEG_Z, Vec3::Y),
                 ..default()
             },
             MyPlayer,
@@ -276,19 +264,6 @@ pub fn setup_system(
                 transform: Transform::from_xyz(3.0, 1.0, 0.0),
                 ..default()
             });
-
-            // // Création du fusil devant la caméra pour un FPS
-            // command.spawn(MaterialMeshBundle {
-            //     material: materials.add(StandardMaterial {
-            //         base_color: Color::rgb(0.0, 0.0, 0.0), // Couleur grise pour le fusil
-            //         ..default()
-            //     }),
-            //     // Le fusil est un cuboid allongé
-            //     mesh: meshes.add(Cuboid::new(0.2, 0.2, 0.6)),
-            //     // Le fusil est positionné légèrement devant et en bas de la caméra, typique des jeux FPS
-            //     transform: Transform::from_xyz(0.5, -0.5, -1.0), // Position devant la caméra
-            //     ..default()
-            // });
         });
 
     // Création du sol
@@ -303,7 +278,7 @@ pub fn setup_system(
     });
 
     // Charger la texture de brique
-    let brick_texture_handle = asset_server.load("textures/brick_textures.png");
+    let brick_texture_handle = asset_server.load("textures/texture1.png");
 
     // Génération des murs avec Cuboid
     for (z, line) in board.data.iter().enumerate() {
@@ -324,24 +299,6 @@ pub fn setup_system(
         }
     }
 
-    // Création de la balise
-    let _ = commands
-        .spawn(MaterialMeshBundle {
-            material: materials.add(StandardMaterial {
-                base_color: Color::rgb(1.0, 0.0, 0.0), // Couleur rouge pour la balise
-                ..default()
-            }),
-            mesh: meshes.add(Sphere::new(0.3)), // Une petite sphère représente la balise
-            transform: Transform::from_xyz(
-                -(position_balise.pos.0 as f32) + 7.0,
-                0.5,
-                position_balise.pos.1 as f32 - 7.0,
-            ),
-            ..default()
-        })
-        .insert(Beacon)
-        .id(); // Insertion du composant `Beacon`
-
     // Passer à l'état Playing une fois que la map est reçue
     next_state.set(AppState::Playing);
     info!("setup create");
@@ -352,20 +309,6 @@ pub fn check_victory_system(
     mut next_state: ResMut<NextState<AppState>>,
     is_win: Res<IsWin>,
 ) {
-    // let beacon_transform = query_beacon.single();
-
-    // for player_transform in query_players.iter() {
-    //     let distance = player_transform
-    //         .translation
-    //         .distance(beacon_transform.translation);
-
-    //     if distance < 1.0 {
-    //         println!("Victoire ! Le joueur a trouvé la balise !");
-    //         next_state.set(AppState::GameOver)
-    //         // Ajoute ici la logique pour gérer la victoire (exemple : fin de la partie)
-    //     }
-    // }
-    info!("le nombre de player : {:?}", player_entities.0.len());
     if is_win.0 == true && player_entities.0.len() == 0 {
         next_state.set(AppState::GameOver);
     }
@@ -507,11 +450,6 @@ pub fn handle_player_spawn_event_system(
         if client_id == my_client_id.0 || player_entities.0.contains_key(&client_id) {
             continue;
         }
-        // info!(
-        //     "Handling player spawn event: {:?} color : {:?}",
-        //     event.0, color
-        // );
-
         // Créer le joueur avec la couleur générée
         let player = commands.spawn((
             MaterialMeshBundle {
@@ -526,10 +464,8 @@ pub fn handle_player_spawn_event_system(
             PlayerEntity(client_id),
         ));
         if let Some(entity) = player_entities.0.get_mut(&client_id) {
-            // info!("je sais pas ce qui ce passe");
             *entity = player.id();
         } else if !player_entities.0.contains_key(&client_id) {
-            //info!("j'ai inserer un joueur");
             player_entities.0.insert(client_id, player.id());
         }
     }
@@ -540,6 +476,7 @@ pub fn handle_lobby_sync_event_system(
     mut sync_events: EventReader<LobbySyncEvent>,
     mut query: Query<(&PlayerEntity, &mut Transform)>,
     my_client_id: Res<MyClientId>, // ID du joueur local
+
 ) {
     let event_option = sync_events.read().last();
     if event_option.is_none() {
@@ -953,21 +890,14 @@ pub fn check_projectile_collision_system(
                     .translation
                     .distance(projectile_transform.translation);
 
-                if distance < 1.0 {
-                    // Le projectile a touché un joueur
-                    // println!("Un joueur a été touché par un projectile !");
-
+                if distance < 0.5 {
                     // Supprimez le projectile de la scène
                     commands.entity(projectile_entity).despawn();
-                    // commands.entity(player_entity).despawn();
                     // Envoyer un message au serveur pour informer de la mort du joueur
                     let message =
                         bincode::serialize(&ServerMessage::PlayerDeath(player.0)).unwrap();
                     client.send_message(DefaultChannel::ReliableOrdered, message);
-
-                    // Changez l'état du jeu en GameOver
-                    println!("la balle a touché le joueur {} ", player.0);
-                    //return; // Sortir de la boucle après avoir terminé le jeu
+                    break;
                 }
             }
         }
