@@ -35,8 +35,7 @@ use bevy::{
     },
     pbr::{MaterialMeshBundle, StandardMaterial},
     prelude::{
-        default, BuildChildren, ButtonBundle, Camera, Camera2dBundle, Changed, Entity, ImageBundle,
-        NextState, NodeBundle, ParamSet, TextBundle, With,
+        default, BuildChildren, ButtonBundle, Camera, Camera2d, Camera2dBundle, Changed, Entity, ImageBundle, NextState, NodeBundle, ParamSet, TextBundle, With
     },
     render::{
         color::{self, Color},
@@ -238,6 +237,7 @@ pub fn setup_system(
     client: ResMut<RenetClient>,
     mut next_state: ResMut<NextState<AppState>>,
     asset_server: Res<AssetServer>,
+    camera_query: Query<Entity, With<Camera2d>>, // Cibler la caméra 2D
 ) {
     if client.is_disconnected() {
         panic!("disconnected : Client is not connected to the server");
@@ -252,19 +252,24 @@ pub fn setup_system(
                 ..default()
             },
             MyPlayer,
-        ))
-        .with_children(|command| {
-            // Joueur représenté par une sphère
-            command.spawn(MaterialMeshBundle {
-                material: materials.add(StandardMaterial {
-                    base_color: Color::rgb(0.0, 1.0, 0.0),
-                    ..default()
-                }),
-                mesh: meshes.add(Sphere::new(0.2)),
-                transform: Transform::from_xyz(3.0, 1.0, 0.0),
-                ..default()
-            });
-        });
+        ));
+        // .with_children(|command| {
+        //     // Joueur représenté par une sphère
+        //     command.spawn(MaterialMeshBundle {
+        //         material: materials.add(StandardMaterial {
+        //             base_color: Color::rgb(0.0, 1.0, 0.0),
+        //             ..default()
+        //         }),
+        //         mesh: meshes.add(Sphere::new(0.2)),
+        //         transform: Transform::from_xyz(3.0, 1.0, 0.0),
+        //         ..default()
+        //     });
+        // });
+
+    // Supprimer la caméra 2D après avoir créé la caméra 3D
+    for camera_entity in camera_query.iter() {
+        commands.entity(camera_entity).despawn();
+    }
 
     // Création du sol
     let board_width = board.data[0].len() as f32;
@@ -371,7 +376,6 @@ pub fn spawn_map_2d(
     let size_map = 100.0; // size_map d'une cellule dans l'affichage
     let cell = size_map / board.data[0].len() as f32;
     let transform = query.single().translation;
-    // j'ai un probleme avec les coordonnes
     // elle ne reflete pas la position reel du joueur
     let xp = (-transform[0].round() + 7.0) * cell;
     let zp = (transform[2].round() + 7.0) * cell;
@@ -655,7 +659,6 @@ pub fn handle_button_click(
     text_query: Query<(Entity, &TextTag)>,
     mut button_clicked: ResMut<ButtonClicked>,
     mut next_state: ResMut<NextState<AppState>>,
-    camera_query: Query<Entity, With<Camera>>, // Ajout de cette Query pour cibler la caméra
 ) {
     for (interaction, button_entity) in &mut interaction_query {
         if *interaction == Interaction::Pressed && !button_clicked.0 {
@@ -669,10 +672,10 @@ pub fn handle_button_click(
                 commands.entity(text_entity).despawn();
             }
 
-            // Supprimer la caméra
-            for camera_entity in camera_query.iter() {
-                commands.entity(camera_entity).despawn();
-            }
+            // // Supprimer la caméra
+            // for camera_entity in camera_query.iter() {
+            //     commands.entity(camera_entity).despawn();
+            // }
             // ici met toutes fonctions pour le commencement du jeu
 
             button_clicked.0 = true; // Mettre à jour l'état pour indiquer que le bouton a été cliqué

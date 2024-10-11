@@ -44,6 +44,7 @@ fn main() {
     app.insert_resource(transport);
     app.insert_resource(IsTakingMap{map : None});
     app.insert_resource(IsDeathOnce { death : false });
+    
 
     // game systems
     app.insert_resource(PlayerLobby(HashMap::default()));
